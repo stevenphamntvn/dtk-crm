@@ -76,11 +76,11 @@ def remove_vietnamese_accent(s):
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 # Xử lý credentials từ Streamlit Cloud Secrets hoặc local file
-CREDS_JSON = os.path.join(BASE_DIR, "credentials.json")  # Default fallback
+CREDS_JSON = os.path.join(BASE_DIR, "credentials.json")  # Default fallback cho local
 
 # Chỉ xử lý secrets khi chạy trên Streamlit Cloud
-if hasattr(st, 'secrets') and "GOOGLE_CREDENTIALS" in st.secrets:
-    try:
+try:
+    if hasattr(st, 'secrets') and "GOOGLE_CREDENTIALS" in st.secrets:
         # Tạo temporary file từ secrets cho Streamlit Cloud
         creds_dict = json.loads(st.secrets["GOOGLE_CREDENTIALS"])
         with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False, encoding='utf-8') as f:
@@ -95,9 +95,9 @@ if hasattr(st, 'secrets') and "GOOGLE_CREDENTIALS" in st.secrets:
             except:
                 pass
         atexit.register(cleanup_creds)
-    except (json.JSONDecodeError, KeyError):
-        # Giữ fallback nếu secrets không đúng format
-        pass
+except Exception:
+    # Giữ fallback nếu có lỗi với secrets
+    pass
 SHEET_ID = "1a0roK3rSRQYlFMYIyC_5iMLNr0t7wUz5IRi0OdckPKA"
 GSK_SHEET_NAME = "BT-PN.PK-6.0-10000"
 # --- Cấu hình bổ sung ---
