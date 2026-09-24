@@ -17,10 +17,21 @@ from st_aggrid.shared import GridUpdateMode, DataReturnMode
 import unicodedata
 
 # ==========================================
+# CẤU HÌNH NHẬN DIỆN Ổ ĐĨA & HÀM HỖ TRỢ BẢN ĐỊA
+# ==========================================
+# Detect if running on Streamlit Cloud (Linux environment)
+IS_CLOUD = os.environ.get('STREAMLIT_SERVER', '') != '' or platform.system() != 'Windows'
+
+# ==========================================
 # PWA INTEGRATION
 # ==========================================
 def inject_pwa_scripts():
     """Inject PWA scripts into Streamlit app"""
+    # Temporarily disable PWA for cloud debugging to fix UI issues
+    if IS_CLOUD:
+        st.info("🔧 PWA integration temporarily disabled for cloud debugging")
+        return
+        
     pwa_html = """
     <link rel="manifest" href="/manifest.json">
     <meta name="theme-color" content="#FF4B4B">
@@ -32,14 +43,11 @@ def inject_pwa_scripts():
     """
     st.markdown(pwa_html, unsafe_allow_html=True)
 
-# Inject PWA scripts at startup
-inject_pwa_scripts()
-
-# ==========================================
-# CẤU HÌNH NHẬN DIỆN Ổ ĐĨA & HÀM HỖ TRỢ BẢN ĐỊA
-# ==========================================
-# Detect if running on Streamlit Cloud (Linux environment)
-IS_CLOUD = os.environ.get('STREAMLIT_SERVER', '') != '' or platform.system() != 'Windows'
+# Inject PWA scripts at startup (disabled for cloud debugging)
+if not IS_CLOUD:
+    inject_pwa_scripts()
+else:
+    st.info("🔧 PWA integration temporarily disabled for cloud debugging")
 
 if IS_CLOUD:
     ROOT_DIR = ""  # Cloud environment doesn't have local file access
@@ -2166,8 +2174,8 @@ with st.sidebar:
 def crm_main_interface():
     df_houses, df_kids, df_log = load_local_data()
     
-    # Cache data for PWA when online
-    if st.session_state.get('pwa_is_online', True):
+    # Cache data for PWA when online (disabled for cloud debugging)
+    if not IS_CLOUD and st.session_state.get('pwa_is_online', True):
         cache_data_for_pwa(df_houses, df_kids, df_log)
     
     # Initial data load check
@@ -2681,8 +2689,8 @@ def cache_data_for_pwa(df_houses, df_kids, df_log):
     """
     st.markdown(pwa_cache_script, unsafe_allow_html=True)
 
-# Check for PWA sync request
-if st.session_state.get('pwa_sync_request'):
+# Check for PWA sync request (disabled for cloud debugging)
+if not IS_CLOUD and st.session_state.get('pwa_sync_request'):
     handle_pwa_sync()
 
 crm_main_interface()
