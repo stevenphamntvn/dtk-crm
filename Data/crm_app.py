@@ -17,19 +17,166 @@ from st_aggrid.shared import GridUpdateMode, DataReturnMode
 import unicodedata
 
 # ==========================================
-# CẤU HÌNH NHẬN DIỆN Ổ ĐĨA & HÀM HỖ TRỢ BẢN ĐỊA
+# 0. CẤU HÌNH TRANG STREAMLIT & GIAO DIỆN CHUẨN (BẮT BUỘC ĐẦU TIÊN)
 # ==========================================
-# Detect if running on Streamlit Cloud (Linux environment)
-IS_CLOUD = os.environ.get('STREAMLIT_SERVER', '') != '' or platform.system() != 'Windows'
+st.set_page_config(
+    page_title="Đại Thế Kỷ Advisor CRM", 
+    layout="wide", 
+    initial_sidebar_state="collapsed"
+)
+
+# Thiết lập theme màu tối đồng nhất cho cả Local và Cloud
+st.markdown("""
+<style>
+    /* Main background */
+    .stApp {
+        background-color: #0f0f0f;
+        color: #e0e0e0;
+    }
+    
+    /* Container backgrounds */
+    .main {
+        background-color: #0f0f0f;
+    }
+    
+    /* Sidebar */
+    [data-testid="stSidebar"] {
+        background-color: #1a1a1a;
+    }
+    
+    /* Headers */
+    h1, h2, h3, h4, h5, h6 {
+        color: #ffffff !important;
+    }
+    
+    /* Text elements */
+    p, span, div, label {
+        color: #e0e0e0 !important;
+    }
+    
+    /* Buttons */
+    .stButton>button {
+        background-color: #2d2d2d;
+        color: #ffffff;
+        border: 1px solid #404040;
+        border-radius: 8px;
+    }
+    .stButton>button:hover {
+        background-color: #3d3d3d;
+        border-color: #505050;
+    }
+    
+    /* Input elements */
+    .stSelectbox>div>div>select, 
+    .stTextInput>div>div>input, 
+    .stNumberInput>div>div>input {
+        background-color: #1a1a1a;
+        color: #ffffff;
+        border: 1px solid #404040;
+    }
+    
+    /* Text areas */
+    .stTextArea>div>div>textarea {
+        background-color: #1a1a1a;
+        color: #ffffff;
+        border: 1px solid #404040;
+    }
+    
+    /* Checkboxes */
+    .stCheckbox>label {
+        color: #e0e0e0;
+    }
+    
+    /* Info boxes */
+    .stAlert {
+        background-color: #1a1a1a;
+        border: 1px solid #404040;
+    }
+    
+    /* Success messages */
+    .stSuccess {
+        background-color: #1a2e1a;
+        border: 1px solid #2d4a2d;
+    }
+    
+    /* Warning messages */
+    .stWarning {
+        background-color: #2e2a1a;
+        border: 1px solid #4a4a2d;
+    }
+    
+    /* Error messages */
+    .stError {
+        background-color: #2e1a1a;
+        border: 1px solid #4a2d2d;
+    }
+    
+    /* Dividers */
+    hr {
+        border-color: #404040;
+    }
+    
+    /* Columns */
+    [data-testid="column"] {
+        background-color: #0f0f0f;
+    }
+    
+    /* Cards and containers */
+    .stContainer {
+        background-color: #0f0f0f;
+    }
+    
+    /* Data tables */
+    .stDataFrame {
+        background-color: #1a1a1a;
+        color: #e0e0e0;
+    }
+    
+    /* Metrics */
+    .stMetric {
+        background-color: #1a1a1a;
+        color: #ffffff;
+    }
+    
+    /* Tabs */
+    [data-testid="stTabs"] {
+        background-color: #0f0f0f;
+    }
+    
+    /* Tab content */
+    [data-testid="stTabContent"] {
+        background-color: #0f0f0f;
+    }
+    
+    /* Reduce white space glare */
+    .block-container {
+        background-color: #0f0f0f;
+        padding-top: 1rem;
+        padding-bottom: 1rem;
+    }
+</style>
+""", unsafe_allow_html=True)
 
 # ==========================================
-# PWA INTEGRATION
+# CẤU HÌNH NHẬN DIỆN MÔI TRƯỜNG & HÀM HỖ TRỢ BẢN ĐỊA
+# ==========================================
+# Nhận diện tự động: Streamlit Cloud (Linux/Container) vs Local PC (Windows)
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+CREDS_JSON = os.path.join(BASE_DIR, "credentials.json")
+
+IS_CLOUD = (
+    os.environ.get('STREAMLIT_SERVER', '') != '' or 
+    platform.system() != 'Windows' or 
+    os.environ.get('STREAMLIT_SHARING_MODE', '') != '' or
+    (hasattr(st, 'secrets') and "GOOGLE_CREDENTIALS" in st.secrets and not os.path.exists(CREDS_JSON))
+)
+
+# ==========================================
+# PWA INTEGRATION (Chỉ kích hoạt ở Local nếu cần)
 # ==========================================
 def inject_pwa_scripts():
     """Inject PWA scripts into Streamlit app"""
-    # Temporarily disable PWA for cloud debugging to fix UI issues
     if IS_CLOUD:
-        st.info("🔧 PWA integration temporarily disabled for cloud debugging")
         return
         
     pwa_html = """
@@ -43,14 +190,11 @@ def inject_pwa_scripts():
     """
     st.markdown(pwa_html, unsafe_allow_html=True)
 
-# Inject PWA scripts at startup (disabled for cloud debugging)
 if not IS_CLOUD:
     inject_pwa_scripts()
-else:
-    st.info("🔧 PWA integration temporarily disabled for cloud debugging")
 
 if IS_CLOUD:
-    ROOT_DIR = ""  # Cloud environment doesn't have local file access
+    ROOT_DIR = ""  # Cloud environment không có truy cập file local Windows
 else:
     path_pc = r"D:\GGD\My Drive\Real estate\QH-SH-MAP\SH\SH Total"
     path_laptop = r"G:\My Drive\Real estate\QH-SH-MAP\SH\SH Total"
@@ -89,30 +233,8 @@ def remove_vietnamese_accent(s):
 
 # Tự động nhận diện thư mục đang chứa file crm_app.py (chính là thư mục 'data')
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+CREDS_JSON = os.path.join(BASE_DIR, "credentials.json")
 
-# Xử lý credentials từ Streamlit Cloud Secrets hoặc local file
-CREDS_JSON = os.path.join(BASE_DIR, "credentials.json")  # Default fallback cho local
-
-# Chỉ xử lý secrets khi chạy trên Streamlit Cloud
-try:
-    if hasattr(st, 'secrets') and "GOOGLE_CREDENTIALS" in st.secrets:
-        # Tạo temporary file từ secrets cho Streamlit Cloud
-        creds_dict = json.loads(st.secrets["GOOGLE_CREDENTIALS"])
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False, encoding='utf-8') as f:
-            json.dump(creds_dict, f, ensure_ascii=False)
-            CREDS_JSON = f.name
-        # Đăng ký cleanup khi session kết thúc
-        import atexit
-        def cleanup_creds():
-            try:
-                if os.path.exists(CREDS_JSON):
-                    os.remove(CREDS_JSON)
-            except:
-                pass
-        atexit.register(cleanup_creds)
-except Exception:
-    # Giữ fallback nếu có lỗi với secrets
-    pass
 SHEET_ID = "1a0roK3rSRQYlFMYIyC_5iMLNr0t7wUz5IRi0OdckPKA"
 GSK_SHEET_NAME = "BT-PN.PK-6.0-10000"
 # --- Cấu hình bổ sung ---
@@ -217,15 +339,36 @@ def clean_numeric(series):
 
 @st.cache_resource
 def get_gspread_client():
-    """Hàm sống còn: Kết nối Google API"""
+    """Hàm sống còn: Kết nối Google API (Hỗ trợ linh hoạt Streamlit Cloud Secrets và credentials.json)"""
     scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
-    creds = ServiceAccountCredentials.from_json_keyfile_name(CREDS_JSON, scope)
-    return gspread.authorize(creds)
+    
+    # 1. Thử lấy credentials từ Streamlit Secrets (dành cho Streamlit Cloud)
+    if hasattr(st, "secrets") and "GOOGLE_CREDENTIALS" in st.secrets:
+        try:
+            creds_data = st.secrets["GOOGLE_CREDENTIALS"]
+            if isinstance(creds_data, str):
+                creds_dict = json.loads(creds_data)
+            else:
+                creds_dict = dict(creds_data)
+            creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
+            return gspread.authorize(creds)
+        except Exception as e:
+            st.error(f"Lỗi khởi tạo Google Service Account từ Secrets: {e}")
+            
+    # 2. Fallback sang file credentials.json (dành cho Local)
+    if os.path.exists(CREDS_JSON):
+        try:
+            creds = ServiceAccountCredentials.from_json_keyfile_name(CREDS_JSON, scope)
+            return gspread.authorize(creds)
+        except Exception as e:
+            st.error(f"Lỗi khởi tạo Google Service Account từ credentials.json: {e}")
+            
+    raise RuntimeError("Không tìm thấy Google Credentials! Vui lòng cấu hình st.secrets['GOOGLE_CREDENTIALS'] trên Cloud hoặc file Data/credentials.json ở Local.")
 
 def pull_khoi_nha():
-    """Tải riêng Khối Nhà (KN) và Bảng Link về Offline Database (OD) - Tích hợp chốt chặn Header"""
+    """Tải riêng Khối Nhà (KN) và Bảng Link về Cache - Tích hợp chốt chặn Header"""
     gc = get_gspread_client()
-    with st.spinner("⬇️ Đang tải Khối Nhà & Link từ Cloud về OD..."):
+    with st.spinner("⬇️ Đang tải Khối Nhà & Link từ Google Sheets..."):
         try:
             sh = gc.open_by_key(SHEET_ID)
             ws_houses = sh.worksheet(GSK_SHEET_NAME)
@@ -248,8 +391,8 @@ def pull_khoi_nha():
                 
                 if missing_cols:
                     st.error(f"🚨 LỖI NGHIÊM TRỌNG: Khối Nhà trên Google Sheets đang bị mất cột Header: **{', '.join(missing_cols)}**.")
-                    st.warning("🛑 Hệ thống đã ngắt lệnh đồng bộ để bảo vệ dữ liệu Local hiện tại. Vui lòng khôi phục lại Header trên Cloud và thử lại!")
-                    return # Ngắt toàn bộ hàm, không cho phép chạy tiếp xuống lệnh to_csv
+                    st.warning("🛑 Hệ thống đã ngắt lệnh đồng bộ để bảo vệ dữ liệu hiện tại. Vui lòng khôi phục lại Header trên Cloud và thử lại!")
+                    return pd.DataFrame()
             # ---------------------------------------------------------
             
             try:
@@ -276,9 +419,45 @@ def pull_khoi_nha():
 
             # Khóa dữ liệu chuẩn chuỗi trước khi lưu chống mất số 0
             df_h.astype(str).to_csv(FILE_GSK, index=False, encoding='utf-8-sig')
-            st.toast("✅ Kho nhà và Link đã được đồng bộ về Local thành công!")
+            st.toast("✅ Kho nhà và Link đã được đồng bộ thành công!")
+            return df_h
         except Exception as e:
             st.error(f"Lỗi tải Khối Nhà: {e}")
+            return pd.DataFrame()
+
+def pull_khoi_khach_va_log():
+    """Tải Khối Khách (MyKID) và Nhật Ký (KID_log) từ Google Sheets về Cache"""
+    gc = get_gspread_client()
+    with st.spinner("⬇️ Đang tải Khối Khách & Nhật Ký từ Google Sheets..."):
+        try:
+            sh = gc.open_by_key(SHEET_ID)
+            
+            # 1. Tải MyKID
+            ws_kids = sh.worksheet("MyKID")
+            data_k = ws_kids.get_all_values()
+            df_k = pd.DataFrame(data_k[1:], columns=data_k[0]) if data_k else pd.DataFrame()
+            if not df_k.empty:
+                df_k.columns = df_k.columns.astype(str).str.strip()
+                df_k.astype(str).to_csv(FILE_KID, index=False, encoding='utf-8-sig')
+                
+            # 2. Tải KID_log
+            ws_logs = sh.worksheet("KID_log")
+            data_l = ws_logs.get_all_values()
+            df_l = pd.DataFrame(data_l[1:], columns=data_l[0]) if data_l else pd.DataFrame()
+            if not df_l.empty:
+                df_l.columns = df_l.columns.astype(str).str.strip()
+                df_l.astype(str).to_csv(FILE_LOG, index=False, encoding='utf-8-sig')
+                
+            st.toast("✅ Khối Khách và Nhật Ký đã được đồng bộ thành công!")
+            return df_k, df_l
+        except Exception as e:
+            st.error(f"Lỗi tải Khối Khách & Nhật Ký: {e}")
+            return pd.DataFrame(), pd.DataFrame()
+
+def pull_all_data():
+    """Tải toàn bộ dữ liệu (Khối Nhà, Khối Khách, Nhật Ký) từ Google Sheets"""
+    pull_khoi_nha()
+    pull_khoi_khach_va_log()
 
 def compare_dataframes(df_local, df_cloud, primary_keys):
     """Thuật toán so sánh Dataframe chuẩn xác bằng Pandas (Lọc Khóa + Deep Compare)"""
@@ -820,11 +999,8 @@ def get_kid_prefs(kid_id, default_tc, kid_tags_str):
     return default_prefs
 
 def load_local_data():
-    """Đọc dữ liệu dưới dạng String tuyệt đối để tránh lỗi tự chuyển 3,7 -> 37"""
+    """Đọc dữ liệu từ Cache; tự động kéo từ Google Sheets nếu thiếu dữ liệu (Cloud hoặc khởi tạo lần đầu)"""
     try:
-        if not os.path.exists(FILE_GSK): 
-            pull_khoi_nha() # ĐÃ FIX: Hàm cũ sync_data_with_gsheet không tồn tại
-            
         def safe_read(filepath):
             # Kiểm tra file có tồn tại và có dung lượng lớn hơn 0
             if os.path.exists(filepath) and os.path.getsize(filepath) > 0:
@@ -844,9 +1020,27 @@ def load_local_data():
         df_k = safe_read(FILE_KID)
         df_l = safe_read(FILE_LOG)
         
+        # Nếu đang chạy trên Cloud HOẶC thiếu bất kỳ file dữ liệu nào -> Tự động kéo từ Google Sheets
+        if df_h.empty:
+            df_h = pull_khoi_nha()
+            if df_h is None or df_h.empty:
+                df_h = safe_read(FILE_GSK)
+                
+        if df_k.empty or df_l.empty:
+            df_k_pulled, df_l_pulled = pull_khoi_khach_va_log()
+            if df_k.empty and df_k_pulled is not None and not df_k_pulled.empty:
+                df_k = df_k_pulled
+            else:
+                df_k = safe_read(FILE_KID)
+                
+            if df_l.empty and df_l_pulled is not None and not df_l_pulled.empty:
+                df_l = df_l_pulled
+            else:
+                df_l = safe_read(FILE_LOG)
+        
         return df_h, df_k, df_l
     except Exception as e:
-        st.error(f"Lỗi đọc Cache tổng: {e}")
+        st.error(f"Lỗi đọc / khởi tạo Cache: {e}")
         return pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
 
 def save_kid_prefs(kid_id, prefs_dict):
@@ -2018,148 +2212,16 @@ def save_pending_logs(schedule_dict, kid_id, df_kids):
 # 4. GIAO DIỆN CHÍNH (MAIN UI APP)
 # ==========================================
 
-st.set_page_config(
-    page_title="Đại Thế Kỷ Advisor CRM", 
-    layout="wide", 
-    initial_sidebar_state="collapsed"
-)
-
-# Thiết lập theme màu đen
-st.markdown("""
-<style>
-    /* Main background */
-    .stApp {
-        background-color: #0f0f0f;
-        color: #e0e0e0;
-    }
-    
-    /* Container backgrounds */
-    .main {
-        background-color: #0f0f0f;
-    }
-    
-    /* Sidebar */
-    [data-testid="stSidebar"] {
-        background-color: #1a1a1a;
-    }
-    
-    /* Headers */
-    h1, h2, h3, h4, h5, h6 {
-        color: #ffffff !important;
-    }
-    
-    /* Text elements */
-    p, span, div, label {
-        color: #e0e0e0 !important;
-    }
-    
-    /* Buttons */
-    .stButton>button {
-        background-color: #2d2d2d;
-        color: #ffffff;
-        border: 1px solid #404040;
-        border-radius: 8px;
-    }
-    .stButton>button:hover {
-        background-color: #3d3d3d;
-        border-color: #505050;
-    }
-    
-    /* Input elements */
-    .stSelectbox>div>div>select, 
-    .stTextInput>div>div>input, 
-    .stNumberInput>div>div>input {
-        background-color: #1a1a1a;
-        color: #ffffff;
-        border: 1px solid #404040;
-    }
-    
-    /* Text areas */
-    .stTextArea>div>div>textarea {
-        background-color: #1a1a1a;
-        color: #ffffff;
-        border: 1px solid #404040;
-    }
-    
-    /* Checkboxes */
-    .stCheckbox>label {
-        color: #e0e0e0;
-    }
-    
-    /* Info boxes */
-    .stAlert {
-        background-color: #1a1a1a;
-        border: 1px solid #404040;
-    }
-    
-    /* Success messages */
-    .stSuccess {
-        background-color: #1a2e1a;
-        border: 1px solid #2d4a2d;
-    }
-    
-    /* Warning messages */
-    .stWarning {
-        background-color: #2e2a1a;
-        border: 1px solid #4a4a2d;
-    }
-    
-    /* Error messages */
-    .stError {
-        background-color: #2e1a1a;
-        border: 1px solid #4a2d2d;
-    }
-    
-    /* Dividers */
-    hr {
-        border-color: #404040;
-    }
-    
-    /* Columns */
-    [data-testid="column"] {
-        background-color: #0f0f0f;
-    }
-    
-    /* Cards and containers */
-    .stContainer {
-        background-color: #0f0f0f;
-    }
-    
-    /* Data tables */
-    .stDataFrame {
-        background-color: #1a1a1a;
-        color: #e0e0e0;
-    }
-    
-    /* Metrics */
-    .stMetric {
-        background-color: #1a1a1a;
-        color: #ffffff;
-    }
-    
-    /* Tabs */
-    [data-testid="stTabs"] {
-        background-color: #0f0f0f;
-    }
-    
-    /* Tab content */
-    [data-testid="stTabContent"] {
-        background-color: #0f0f0f;
-    }
-    
-    /* Reduce white space glare */
-    .block-container {
-        background-color: #0f0f0f;
-        padding-top: 1rem;
-        padding-bottom: 1rem;
-    }
-</style>
-""", unsafe_allow_html=True)
 st.title("🚀 ĐẠI THẾ KỶ ADVISOR - CRM V1.0")
 st.markdown("---")
 
 with st.sidebar:
-    st.header("Trạm Đồng Bộ KK 🔄")
+    st.header("Trạm Đồng Bộ 🔄")
+    if IS_CLOUD:
+        st.success("☁️ Chế độ: **Cloud (Online)**")
+    else:
+        st.info("💻 Chế độ: **Local (Offline-First)**")
+        
     st.info("💡 Hướng dẫn:\n- Cả 2 tác vụ TẢI VỀ và UP LÊN đều có bước So sánh & Báo cáo để bạn kiểm duyệt trước khi ghi đè, đảm bảo an toàn dữ liệu.\n\n*(Ghi chú: Khối Nhà được tải bằng nút 🔄 LÀM MỚI BẢNG ở Tab 1)*")
     
     if st.button("📥 TẢI KK VỀ (Pull)", use_container_width=True):
@@ -2169,6 +2231,17 @@ with st.sidebar:
         
     if st.button("📤 UP KK LÊN (Push)", type="primary", use_container_width=True):
         trigger_sync_khoi_khach(direction="push")
+
+    st.markdown("<br>", unsafe_allow_html=True)
+    if st.button("🔄 TẢI TẤT CẢ TỪ CLOUD (Reset All)", use_container_width=True):
+        with st.spinner("Đang kéo toàn bộ dữ liệu từ Google Sheets..."):
+            try:
+                pull_all_data()
+                st.cache_data.clear()
+                st.toast("✅ Đã tải toàn bộ dữ liệu thành công!")
+                st.rerun()
+            except Exception as e:
+                st.error(f"Lỗi: {e}")
 
 @st.fragment
 def crm_main_interface():
@@ -2181,6 +2254,14 @@ def crm_main_interface():
     # Initial data load check
     if df_houses.empty and df_kids.empty and df_log.empty:
         st.warning("🚀 Chưa có dữ liệu nào. Hãy tải dữ liệu từ Google Sheets để bắt đầu.")
+        if st.button("🔄 TẢI TOÀN BỘ DỮ LIỆU TỪ GOOGLE SHEETS", type="primary", use_container_width=True):
+            with st.spinner("Đang tải toàn bộ dữ liệu..."):
+                try:
+                    pull_all_data()
+                    st.cache_data.clear()
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Lỗi tải dữ liệu: {e}")
         col1, col2, col3 = st.columns(3)
         
         with col1:
@@ -2197,7 +2278,7 @@ def crm_main_interface():
             if st.button("📥 Tải Khối Khách", use_container_width=True):
                 with st.spinner("Đang tải Khối Khách..."):
                     try:
-                        trigger_sync_khoi_khach(direction="pull")
+                        pull_khoi_khach_va_log()
                         st.cache_data.clear()
                         st.rerun()
                     except Exception as e:
@@ -2207,7 +2288,7 @@ def crm_main_interface():
             if st.button("📝 Tải Nhật Ký", use_container_width=True):
                 with st.spinner("Đang tải Nhật Ký..."):
                     try:
-                        trigger_sync_khoi_khach(direction="pull")
+                        pull_khoi_khach_va_log()
                         st.cache_data.clear()
                         st.rerun()
                     except Exception as e:
@@ -2225,11 +2306,11 @@ def crm_main_interface():
         st.header("🎯 Gợi ý nhà phù hợp cho khách" if not is_tim_mode else "🎯 Chọn Siêu Phẩm (Tìm Khách)")
         
         if df_houses.empty or df_kids.empty:
-            st.warning("Thiếu dữ liệu nguồn.")
-            if st.button("🔄 Tải dữ liệu từ Google Sheets", use_container_width=True):
-                with st.spinner("Đang tải dữ liệu..."):
+            st.warning("Thiếu dữ liệu nguồn (Khối Nhà hoặc Khối Khách).")
+            if st.button("🔄 Tải toàn bộ dữ liệu từ Google Sheets", use_container_width=True):
+                with st.spinner("Đang tải toàn bộ dữ liệu..."):
                     try:
-                        pull_khoi_nha()
+                        pull_all_data()
                         st.cache_data.clear()
                         st.rerun()
                     except Exception as e:
@@ -2575,7 +2656,7 @@ def crm_main_interface():
             if st.button("📥 Tải Khối Khách từ Google Sheets", use_container_width=True):
                 with st.spinner("Đang tải Khối Khách..."):
                     try:
-                        trigger_sync_khoi_khach(direction="pull")
+                        pull_khoi_khach_va_log()
                         st.cache_data.clear()
                         st.rerun()
                     except Exception as e:
@@ -2592,7 +2673,7 @@ def crm_main_interface():
             if st.button("📥 Tải Nhật Ký từ Google Sheets", use_container_width=True):
                 with st.spinner("Đang tải Nhật Ký..."):
                     try:
-                        trigger_sync_khoi_khach(direction="pull")
+                        pull_khoi_khach_va_log()
                         st.cache_data.clear()
                         st.rerun()
                     except Exception as e:
