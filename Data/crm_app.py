@@ -2209,6 +2209,63 @@ def save_pending_logs(schedule_dict, kid_id, df_kids):
         st.error(f"Lỗi ghi log: {e}")
         return False
 # ==========================================
+# 3.5. XÁC THỰC ĐĂNG NHẬP (CHỈ ÁP DỤNG BẢN CLOUD)
+# ==========================================
+def check_authentication():
+    """Bắt buộc đăng nhập khi chạy trên Cloud; Local tự động bỏ qua"""
+    if not IS_CLOUD:
+        return True
+
+    if st.session_state.get('authenticated', False):
+        return True
+
+    # Lấy danh sách tài khoản hợp lệ từ Streamlit Secrets
+    valid_users = {}
+    if hasattr(st, "secrets"):
+        if "users" in st.secrets:
+            # Hỗ trợ cấu hình dạng: [users] admin = "matkhau"
+            valid_users = {str(k).strip(): str(v).strip() for k, v in dict(st.secrets["users"]).items()}
+        elif "APP_PASSWORD" in st.secrets:
+            # Hỗ trợ cấu hình dạng: APP_USERNAME = "admin", APP_PASSWORD = "..."
+            u = str(st.secrets.get("APP_USERNAME", "admin")).strip()
+            p = str(st.secrets.get("APP_PASSWORD", "")).strip()
+            if p:
+                valid_users[u] = p
+
+    # Fallback tài khoản mặc định nếu chưa cấu hình trong secrets
+    if not valid_users:
+        valid_users = {"admin": "dtk@2025"}
+
+    # Giao diện Form Đăng Nhập
+    _, col_login, _ = st.columns([1, 1.3, 1])
+    with col_login:
+        st.markdown("<br><br>", unsafe_allow_html=True)
+        st.markdown("<h2 style='text-align: center;'>🔒 ĐĂNG NHẬP HỆ THỐNG</h2>", unsafe_allow_html=True)
+        st.markdown("<p style='text-align: center; color: #aaa;'>Đại Thế Kỷ Advisor CRM - Cloud Edition</p>", unsafe_allow_html=True)
+        st.markdown("<br>", unsafe_allow_html=True)
+
+        with st.form("cloud_login_form", clear_on_submit=False):
+            username_input = st.text_input("👤 Tên đăng nhập:", placeholder="Nhập tên tài khoản...").strip()
+            password_input = st.text_input("🔑 Mật khẩu:", type="password", placeholder="Nhập mật khẩu...").strip()
+            
+            st.markdown("<br>", unsafe_allow_html=True)
+            submitted = st.form_submit_button("🚀 ĐĂNG NHẬP", use_container_width=True, type="primary")
+
+            if submitted:
+                if username_input in valid_users and valid_users[username_input] == password_input:
+                    st.session_state['authenticated'] = True
+                    st.session_state['logged_in_user'] = username_input
+                    st.toast(f"✅ Chào mừng {username_input} đã đăng nhập thành công!", icon="🎉")
+                    st.rerun()
+                else:
+                    st.error("❌ Tên đăng nhập hoặc mật khẩu không chính xác!")
+
+    st.stop() # Dừng vẽ toàn bộ giao diện phía sau khi chưa đăng nhập
+
+# Kiểm tra quyền truy cập ngay đầu chu trình giao diện
+check_authentication()
+
+# ==========================================
 # 4. GIAO DIỆN CHÍNH (MAIN UI APP)
 # ==========================================
 
@@ -2218,7 +2275,7 @@ st.markdown("---")
 with st.sidebar:
     st.header("Trạm Đồng Bộ 🔄")
     if IS_CLOUD:
-        st.success("☁️ Chế độ: **Cloud (Online)**")
+        st.success(f"☁️ Cloud User: **{st.session_state.get('logged_in_user', 'Admin')}**")
     else:
         st.info("💻 Chế độ: **Local (Offline-First)**")
         
@@ -2242,6 +2299,14 @@ with st.sidebar:
                 st.rerun()
             except Exception as e:
                 st.error(f"Lỗi: {e}")
+
+    # Nút Đăng xuất cho bản Cloud
+    if IS_CLOUD and st.session_state.get('authenticated'):
+        st.markdown("---")
+        if st.button("🚪 Đăng Xuất", use_container_width=True):
+            st.session_state['authenticated'] = False
+            st.session_state.pop('logged_in_user', None)
+            st.rerun()
 
 @st.fragment
 def crm_main_interface():
