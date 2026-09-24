@@ -294,7 +294,7 @@ UI_WIDTH = {
     "t1_quan": 60,
     "t1_phuong": 42,
     "t1_sonha": 90, # Cột số nhà tùy chỉnh theo ý muốn
-    "t1_ggd": 50,   # Cột Link ảnh Google Drive (Nằm giữa Số nhà và Tên đường)
+    "t1_ggd": 25,   # Cột Link ảnh Google Drive (Chỉ để 25px)
     "t1_tenduong": 120,
     "t1_ngang": 40,
     "t1_dai": 40,
@@ -302,7 +302,7 @@ UI_WIDTH = {
     "t1_gia": 55,
     "t1_dinhgia": 55,
     "t1_ketcau": 50,
-    "t1_dacdiem": 200,
+    "t1_dacdiem": 250, # Cột đặc điểm tăng thêm 50px (200 -> 250px)
     "t1_update": 90,
     "t1_uid": 50,
     "t1_cus": 120,
@@ -1078,6 +1078,36 @@ def update_offline_logs(df_to_save):
     except:
         return False
 
+def extract_highlight(text):
+    """Trích xuất các đặc điểm, từ khóa và tag từ cột mô tả chi tiết"""
+    if not text or pd.isna(text): return ""
+    t_upper = str(text).upper()
+    found = []
+    
+    # 1. Các tag cố định
+    tags = ["TOH", "2MT", "CGO", "P1C", "T1C", "GAC", "GCH", "DAD", "NTC", "SA4", "NOH", "MTR", "QHH", "TTT", "DTT", "CVI", "GCV", "VLA", "VPH", "TMA", "MAT", "HXT", "HXH", "HBG", "KLP"]
+    for t in tags:
+        if t in t_upper and t not in found:
+            found.append(t)
+            
+    # 2. Các tag động theo mẫu Regex (PNxx, SCNxx, SLGxx, QHxx, DTNxx)
+    dynamic_matches = re.findall(r'\b(PN|SCN|SLG|QH|DTN)\s*(\d+)\b', t_upper)
+    for prefix, num in dynamic_matches:
+        tag = f"{prefix}{num}"
+        if tag not in found:
+            found.append(tag)
+            
+    return ", ".join(found)
+
+def extract_note(text):
+    """Trích xuất ghi chú riêng N(...) từ cột mô tả chi tiết"""
+    if not text or pd.isna(text): return ""
+    s = str(text)
+    match = re.search(r'(?i)N\(([\s\S]*?)\)', s)
+    if match:
+        return match.group(1).strip()
+    return ""
+
 def filter_houses(df_houses, min_gia, max_gia, selected_quan, selected_phuong, min_ngang, min_pn, min_tang, min_dt, require_tma, require_ntc, no_bad_fengshui, require_ttt, require_dtt, require_2mt, require_cgo, only_mat, req_hxt, req_hxh, req_hbg):
     if df_houses.empty: return pd.DataFrame()
     res = df_houses.copy()
@@ -1183,28 +1213,6 @@ def filter_houses(df_houses, min_gia, max_gia, selected_quan, selected_phuong, m
             res = res.sort_values(by='rank')
 
     if not res.empty and c_mota in res.columns:
-        tags = ["TOH", "2MT", "CGO", "P1C", "T1C", "GAC", "GCH", "DAD", "NTC", "SA4", "NOH", "MTR", "QHH", "TTT", "DTT", "CVI", "GCV", "VLA", "VPH", "TMA", "MAT", "HXT", "HXH", "HBG", "KLP"]
-        def extract_highlight(text):
-            if not text or pd.isna(text): return ""
-            t_upper = str(text).upper()
-            found = [t for t in tags if t in t_upper]
-            # Trích xuất các tag động theo mẫu Regex: PNxx, SCNxx, SLGxx, QHxx, DTNxx
-            dynamic_matches = re.findall(r'(PN\d+|SCN\d+|SLG\d+|QH\d+|DTN\d+)', t_upper)
-            for m in dynamic_matches:
-                if m not in found:
-                    found.append(m)
-            return ", ".join(found)
-
-        def extract_note(text):
-            if not text or pd.isna(text): return ""
-            s = str(text)
-            match = re.search(r'(?i)N\(([\s\S]*?)\)(?:\s*$|\n|\r)', s)
-            if not match:
-                match = re.search(r'(?i)N\(([\s\S]*?)\)', s)
-            if match:
-                return match.group(1).strip()
-            return ""
-            
         res['dacdiem'] = res[c_mota].apply(extract_highlight)
         res['note_rieng'] = res[c_mota].apply(extract_note)
     
@@ -1727,11 +1735,13 @@ def render_aggrid(results, df_log, kid_id):
     # Tạo cột hiển thị nút GGD (gán nhãn 📂 nếu có link, ngược lại để trống)
     results['GGD'] = results[c_link_ggd_hidden].apply(lambda x: '📂' if str(x).strip().startswith('http') else '📁')
 
-    # Trích xuất dacdiem và note_rieng nếu chưa có
-    if 'dacdiem' not in results.columns and c_mota in results.columns:
+    # Luôn trích xuất dacdiem và note_rieng trực tiếp từ motachitiet để đảm bảo dữ liệu mới nhất
+    if c_mota in results.columns:
         results['dacdiem'] = results[c_mota].apply(extract_highlight)
-    if 'note_rieng' not in results.columns and c_mota in results.columns:
         results['note_rieng'] = results[c_mota].apply(extract_note)
+    else:
+        if 'dacdiem' not in results.columns: results['dacdiem'] = ""
+        if 'note_rieng' not in results.columns: results['note_rieng'] = ""
 
     # Danh sách hiển thị dùng TÊN CỘT THỰC TẾ
     display_cols = [
