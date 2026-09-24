@@ -76,23 +76,28 @@ def remove_vietnamese_accent(s):
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 # Xử lý credentials từ Streamlit Cloud Secrets hoặc local file
-if "GOOGLE_CREDENTIALS" in st.secrets:
-    # Tạo temporary file từ secrets cho Streamlit Cloud
-    creds_dict = json.loads(st.secrets["GOOGLE_CREDENTIALS"])
-    with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False, encoding='utf-8') as f:
-        json.dump(creds_dict, f, ensure_ascii=False)
-        CREDS_JSON = f.name
-    # Đăng ký cleanup khi session kết thúc
-    import atexit
-    def cleanup_creds():
-        try:
-            if os.path.exists(CREDS_JSON):
-                os.remove(CREDS_JSON)
-        except:
-            pass
-    atexit.register(cleanup_creds)
-else:
-    # Fallback cho local development
+try:
+    if hasattr(st, 'secrets') and "GOOGLE_CREDENTIALS" in st.secrets:
+        # Tạo temporary file từ secrets cho Streamlit Cloud
+        creds_dict = json.loads(st.secrets["GOOGLE_CREDENTIALS"])
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False, encoding='utf-8') as f:
+            json.dump(creds_dict, f, ensure_ascii=False)
+            CREDS_JSON = f.name
+        # Đăng ký cleanup khi session kết thúc
+        import atexit
+        def cleanup_creds():
+            try:
+                if os.path.exists(CREDS_JSON):
+                    os.remove(CREDS_JSON)
+            except:
+                pass
+        atexit.register(cleanup_creds)
+    else:
+        # Fallback cho local development
+        CREDS_JSON = os.path.join(BASE_DIR, "credentials.json")
+except Exception as e:
+    st.error(f"Lỗi setup credentials: {e}")
+    # Fallback cuối cùng
     CREDS_JSON = os.path.join(BASE_DIR, "credentials.json")
 SHEET_ID = "1a0roK3rSRQYlFMYIyC_5iMLNr0t7wUz5IRi0OdckPKA"
 GSK_SHEET_NAME = "BT-PN.PK-6.0-10000"
