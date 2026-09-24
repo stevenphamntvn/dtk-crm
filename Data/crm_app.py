@@ -25,7 +25,7 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
-# Thiết lập theme màu tối đồng nhất cho cả Local và Cloud
+# Thiết lập theme màu tối đồng nhất cho cả Local và Cloud (Tối ưu Full-Width tràn viền cho Tablet)
 st.markdown("""
 <style>
     /* Main background */
@@ -37,6 +37,16 @@ st.markdown("""
     /* Container backgrounds */
     .main {
         background-color: #0f0f0f;
+    }
+    
+    /* Tối ưu tràn viền Full-Width 100% cho màn hình Tablet & Cloud */
+    .block-container, [data-testid="stAppViewBlockContainer"] {
+        background-color: #0f0f0f;
+        max-width: 100% !important;
+        padding-top: 0.5rem !important;
+        padding-bottom: 0.5rem !important;
+        padding-left: 0.5rem !important;
+        padding-right: 0.5rem !important;
     }
     
     /* Sidebar */
@@ -147,13 +157,6 @@ st.markdown("""
     [data-testid="stTabContent"] {
         background-color: #0f0f0f;
     }
-    
-    /* Reduce white space glare */
-    .block-container {
-        background-color: #0f0f0f;
-        padding-top: 1rem;
-        padding-bottom: 1rem;
-    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -164,12 +167,21 @@ st.markdown("""
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 CREDS_JSON = os.path.join(BASE_DIR, "credentials.json")
 
-IS_CLOUD = (
-    os.environ.get('STREAMLIT_SERVER', '') != '' or 
-    platform.system() != 'Windows' or 
-    os.environ.get('STREAMLIT_SHARING_MODE', '') != '' or
-    (hasattr(st, 'secrets') and "GOOGLE_CREDENTIALS" in st.secrets and not os.path.exists(CREDS_JSON))
-)
+def detect_is_cloud():
+    """Nhận diện tự động môi trường Cloud mà không gây lỗi khi thiếu secrets.toml ở Local"""
+    if os.environ.get('STREAMLIT_SERVER', '') != '' or os.environ.get('STREAMLIT_SHARING_MODE', '') != '':
+        return True
+    if platform.system() != 'Windows':
+        return True
+    # Kiểm tra an toàn secrets
+    try:
+        if hasattr(st, 'secrets') and "GOOGLE_CREDENTIALS" in st.secrets and not os.path.exists(CREDS_JSON):
+            return True
+    except Exception:
+        pass
+    return False
+
+IS_CLOUD = detect_is_cloud()
 
 # ==========================================
 # PWA INTEGRATION (Chỉ kích hoạt ở Local nếu cần)
@@ -281,6 +293,7 @@ UI_WIDTH = {
     "t1_quan": 60,
     "t1_phuong": 42,
     "t1_sonha": 90, # Cột số nhà tùy chỉnh theo ý muốn
+    "t1_ggd": 45,   # Cột Link ảnh Google Drive (Nằm giữa Số nhà và Tên đường)
     "t1_tenduong": 120,
     "t1_ngang": 40,
     "t1_dai": 40,
@@ -343,8 +356,8 @@ def get_gspread_client():
     scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
     
     # 1. Thử lấy credentials từ Streamlit Secrets (dành cho Streamlit Cloud)
-    if hasattr(st, "secrets") and "GOOGLE_CREDENTIALS" in st.secrets:
-        try:
+    try:
+        if hasattr(st, "secrets") and "GOOGLE_CREDENTIALS" in st.secrets:
             creds_data = st.secrets["GOOGLE_CREDENTIALS"]
             if isinstance(creds_data, str):
                 creds_dict = json.loads(creds_data)
@@ -352,8 +365,8 @@ def get_gspread_client():
                 creds_dict = dict(creds_data)
             creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
             return gspread.authorize(creds)
-        except Exception as e:
-            st.error(f"Lỗi khởi tạo Google Service Account từ Secrets: {e}")
+    except Exception:
+        pass
             
     # 2. Fallback sang file credentials.json (dành cho Local)
     if os.path.exists(CREDS_JSON):
@@ -1503,6 +1516,17 @@ def get_aggrid_js_codes(c_link_hidden, c_link_ggd_hidden):
             if (linkVal && linkVal.startsWith('http')) {{ window.open(linkVal, '_blank'); }}
         }}
         """),
+        "open_ggd_click": JsCode(f"""
+        function(params) {{
+            const linkVal = params.node.data['{c_link_ggd_hidden}'];
+            if (linkVal && linkVal.startsWith('http')) {{ 
+                window.open(linkVal, '_blank'); 
+            }} else {{
+                // Nếu chưa có link Google Drive thì kích hoạt mở thư mục Offline (Local)
+                params.node.setDataValue('_folder_trigger', Date.now().toString());
+            }}
+        }}
+        """),
         # Sửa DCL từ mở link sang phát tín hiệu mở Folder offline
         "tenduong_dclick": JsCode("""
         function(params) {
@@ -1518,6 +1542,15 @@ def get_aggrid_js_codes(c_link_hidden, c_link_ggd_hidden):
                 return {{'color': '#007bff', 'textDecoration': 'underline', 'fontWeight': 'bold', 'cursor': 'pointer'}};
             }}
             return {{ 'cursor': 'pointer' }};
+        }}
+        """),
+        "ggd_col_style": JsCode(f"""
+        function(params) {{
+            const link = params.node.data['{c_link_ggd_hidden}'];
+            if (link && link.startsWith('http')) {{
+                return {{'cursor': 'pointer', 'backgroundColor': '#1e293b', 'color': '#38bdf8', 'textAlign': 'center', 'fontWeight': 'bold', 'border': '1px solid #334155', 'borderRadius': '4px'}};
+            }}
+            return {{'cursor': 'pointer', 'textAlign': 'center', 'color': '#64748b'}};
         }}
         """),
         "tenduong_style": JsCode(f"""
@@ -1674,10 +1707,13 @@ def render_aggrid(results, df_log, kid_id):
             results = results.sort_values(by='_rank_pl', ascending=True)
     # === KẾT THÚC KHỐI SẮP XẾP ===
 
+    # Tạo cột hiển thị nút GGD (gán nhãn 📂 nếu có link, ngược lại để trống)
+    results['GGD'] = results[c_link_ggd_hidden].apply(lambda x: '📂' if str(x).strip().startswith('http') else '📁')
+
     # Danh sách hiển thị dùng TÊN CỘT THỰC TẾ
     display_cols = [
         'Trạng thái', c_pl, c_quan, c_phuong, 
-        c_sonha, c_tenduong, c_ngang, 
+        c_sonha, 'GGD', c_tenduong, c_ngang, 
         c_dai, c_dt, c_gia, 'Định giá', c_ketcau, 
         'dacdiem', c_update, c_uid, c_cus, 
         c_link_hidden, c_link_ggd_hidden
@@ -1702,6 +1738,9 @@ def render_aggrid(results, df_log, kid_id):
     gb.configure_column(c_phuong, width=UI_WIDTH["t1_phuong"], minWidth=UI_WIDTH["t1_phuong"], maxWidth=UI_WIDTH["t1_phuong"])
     
     gb.configure_column(c_sonha, width=UI_WIDTH["t1_sonha"], minWidth=UI_WIDTH["t1_sonha"], maxWidth=UI_WIDTH["t1_sonha"], onCellClicked=js["copy_text"], onCellDoubleClicked=js["sonha_dclick"], cellStyle=js["sonha_style"])
+    gb.configure_column('GGD', header_name="Ảnh", width=UI_WIDTH["t1_ggd"], minWidth=UI_WIDTH["t1_ggd"], maxWidth=UI_WIDTH["t1_ggd"],
+                        onCellClicked=js["open_ggd_click"],
+                        cellStyle=js["ggd_col_style"])
     gb.configure_column(c_tenduong, width=UI_WIDTH["t1_tenduong"], minWidth=UI_WIDTH["t1_tenduong"], maxWidth=UI_WIDTH["t1_tenduong"], 
                         onCellClicked=js["copy_text"], 
                         onCellDoubleClicked=js["tenduong_dclick"], 
@@ -2219,18 +2258,21 @@ def check_authentication():
     if st.session_state.get('authenticated', False):
         return True
 
-    # Lấy danh sách tài khoản hợp lệ từ Streamlit Secrets
+    # Lấy danh sách tài khoản hợp lệ từ Streamlit Secrets (an toàn)
     valid_users = {}
-    if hasattr(st, "secrets"):
-        if "users" in st.secrets:
-            # Hỗ trợ cấu hình dạng: [users] admin = "matkhau"
-            valid_users = {str(k).strip(): str(v).strip() for k, v in dict(st.secrets["users"]).items()}
-        elif "APP_PASSWORD" in st.secrets:
-            # Hỗ trợ cấu hình dạng: APP_USERNAME = "admin", APP_PASSWORD = "..."
-            u = str(st.secrets.get("APP_USERNAME", "admin")).strip()
-            p = str(st.secrets.get("APP_PASSWORD", "")).strip()
-            if p:
-                valid_users[u] = p
+    try:
+        if hasattr(st, "secrets"):
+            if "users" in st.secrets:
+                # Hỗ trợ cấu hình dạng: [users] admin = "matkhau"
+                valid_users = {str(k).strip(): str(v).strip() for k, v in dict(st.secrets["users"]).items()}
+            elif "APP_PASSWORD" in st.secrets:
+                # Hỗ trợ cấu hình dạng: APP_USERNAME = "admin", APP_PASSWORD = "..."
+                u = str(st.secrets.get("APP_USERNAME", "admin")).strip()
+                p = str(st.secrets.get("APP_PASSWORD", "")).strip()
+                if p:
+                    valid_users[u] = p
+    except Exception:
+        pass
 
     # Fallback tài khoản mặc định nếu chưa cấu hình trong secrets
     if not valid_users:
@@ -2381,17 +2423,42 @@ def crm_main_interface():
                     except Exception as e:
                         st.error(f"Lỗi tải dữ liệu: {e}")
         else:
-            col_left, col_right = st.columns([1, 3])
+            # 1. CHUẨN BỊ DANH SÁCH KHÁCH HÀNG & PHÂN LOẠI
+            plk_unique = sorted([p for p in df_kids['PLK'].astype(str).str.strip().str.upper().unique() if p and p.lower() not in ['nan', 'none']])
+            filter_options = ["Tất cả (A,B,C)"] + [f"Khách {p}" for p in plk_unique if p != 'D'] + ["Khách D (Đã bỏ)"]
             
-            with col_left:
+            if 'last_saved_kid' not in st.session_state:
+                st.session_state['last_saved_kid'] = ""
+                if os.path.exists(FILE_LAST_KID):
+                    try:
+                        with open(FILE_LAST_KID, "r", encoding="utf-8") as f:
+                            st.session_state['last_saved_kid'] = f.read().strip()
+                    except: pass
+
+            # Xử lý làm sạch số liệu kho nhà
+            df_h_clean = df_houses.copy()
+            for col in [CONFIG_GSK_CM["NGANG"], CONFIG_GSK_CM["DAI"], CONFIG_GSK_CM["GIA"]]:
+                if col in df_h_clean.columns: df_h_clean[col] = clean_numeric(df_h_clean[col])
+            
+            pl_col = CONFIG_GSK_CM["PL"]
+            if pl_col in df_h_clean.columns:
+                active_houses = df_h_clean[df_h_clean[pl_col].astype(str).str.strip().str.upper().isin(['TAR', 'HID', 'A'])]
+            else:
+                active_houses = df_h_clean
+
+            districts = active_houses[CONFIG_GSK_CM["QUAN"]].astype(str).str.strip().str.title().unique().tolist()
+
+            # =========================================================
+            # PHÂN NHÁNH GIAO DIỆN: CLOUD (FULL-WIDTH) vs LOCAL (2 CỘT)
+            # =========================================================
+            if IS_CLOUD:
+                # -----------------------------------------------------
+                # GIAO DIỆN CLOUD: BẢNG NHÀ FULL-WIDTH TRÊN, BỘ LỌC DƯỚI
+                # -----------------------------------------------------
                 st.subheader("1. Chọn khách" if not is_tim_mode else "1. Rổ hàng (Đã Mở Khóa)")
-                
                 filter_col, select_col = st.columns([1, 2.5])
                 
-                plk_unique = sorted([p for p in df_kids['PLK'].astype(str).str.strip().str.upper().unique() if p and p.lower() not in ['nan', 'none']])
-                filter_options = ["Tất cả (A,B,C)"] + [f"Khách {p}" for p in plk_unique if p != 'D'] + ["Khách D (Đã bỏ)"]
-                
-                selected_filter = filter_col.selectbox("Lọc mức độ:", filter_options, disabled=is_tim_mode)
+                selected_filter = filter_col.selectbox("Lọc mức độ:", filter_options, disabled=is_tim_mode, key="cloud_plk_filter")
                 
                 if selected_filter == "Tất cả (A,B,C)":
                     df_kids_active = df_kids[df_kids['PLK'].astype(str).str.strip().str.upper() != 'D'].copy()
@@ -2407,26 +2474,15 @@ def crm_main_interface():
                     plk = str(row.get('PLK', '')).strip().upper()
                     ttk = str(row.get('thongtin_KID', '')).strip()
                     plk_str = f"({plk})" if plk else ""
-                    
                     display_str = f"{k}{plk_str}. {ttk}"
                     kid_mapping[display_str] = k
                     
                 kid_list = list(kid_mapping.keys())
-                
                 if not kid_list:
                     select_col.warning(f"Không có {selected_filter.lower()}.")
                     st.stop()
                     
-                if 'last_saved_kid' not in st.session_state:
-                    st.session_state['last_saved_kid'] = ""
-                    if os.path.exists(FILE_LAST_KID):
-                        try:
-                            with open(FILE_LAST_KID, "r", encoding="utf-8") as f:
-                                st.session_state['last_saved_kid'] = f.read().strip()
-                        except: pass
-                        
                 selectbox_key = f"kid_selectbox_{selected_filter}"
-                
                 if selectbox_key not in st.session_state or st.session_state[selectbox_key] not in kid_list:
                     default_val = kid_list[0]
                     if st.session_state.get('last_saved_kid'):
@@ -2472,7 +2528,6 @@ def crm_main_interface():
                     
                     if not is_tim_mode:
                         prefs = parse_blk(blk_str)
-                        
                         st.session_state.f_min_gia = float(prefs.get('min_gia', 0.0))
                         parsed_max_gia = float(prefs.get('max_gia', 0.0))
                         st.session_state.f_max_gia = parsed_max_gia if parsed_max_gia > 0 else 100.0
@@ -2488,60 +2543,37 @@ def crm_main_interface():
 
                 suffix = "tim" if is_tim_mode else str(kid_id)
 
-                st.subheader("2. Tinh chỉnh bộ lọc")
-                if is_tim_mode:
-                    st.info("🔓 Kho hàng đang mở khóa toàn bộ. Bạn có thể tự chỉnh lọc bằng tay bên dưới để khoanh vùng.")
-                    
-                min_gia = st.number_input("Giá từ (Tỷ)", value=st.session_state.f_min_gia, step=1.0, key=f"mg_{suffix}")
-                max_gia = st.number_input("Đến (Tỷ)", value=st.session_state.f_max_gia, step=1.0, key=f"xg_{suffix}")
-                
-                df_h_clean = df_houses.copy()
-                for col in [CONFIG_GSK_CM["NGANG"], CONFIG_GSK_CM["DAI"], CONFIG_GSK_CM["GIA"]]:
-                    if col in df_h_clean.columns: df_h_clean[col] = clean_numeric(df_h_clean[col])
-                
-                pl_col = CONFIG_GSK_CM["PL"]
-                if pl_col in df_h_clean.columns:
-                    active_houses = df_h_clean[df_h_clean[pl_col].astype(str).str.strip().str.upper().isin(['TAR', 'HID', 'A'])]
-                else:
-                    active_houses = df_h_clean
-
-                districts = active_houses[CONFIG_GSK_CM["QUAN"]].astype(str).str.strip().str.title().unique().tolist()
+                # Lấy giá trị bộ lọc hiện tại
+                min_gia = float(st.session_state.get(f"mg_{suffix}", st.session_state.f_min_gia))
+                max_gia = float(st.session_state.get(f"xg_{suffix}", st.session_state.f_max_gia))
                 
                 valid_default_q = [q for q in st.session_state.f_quan if q in districts]
-                sel_q = st.multiselect("Chọn Quận", districts, default=valid_default_q, key=f"q_{suffix}")
+                sel_q = st.session_state.get(f"q_{suffix}", valid_default_q)
                 
                 list_p = active_houses[active_houses[CONFIG_GSK_CM["QUAN"]].str.title().isin(sel_q)][CONFIG_GSK_CM["PHUONG"]].astype(str).str.replace(r'\.0$', '', regex=True).unique().tolist() if sel_q else []
-                
                 valid_default_p = [p for p in st.session_state.f_phuong if p in list_p]
-                sel_p = st.multiselect("Chọn Phường", list_p, default=valid_default_p, key=f"p_{suffix}")
+                sel_p = st.session_state.get(f"p_{suffix}", valid_default_p)
                 
-                col_n1, col_n2 = st.columns(2)
-                min_n = col_n1.number_input("Ngang (m)", value=st.session_state.f_ngang, step=1.0, key=f"mn_{suffix}")
-                min_pn = col_n2.number_input("Số PN", value=int(st.session_state.f_min_pn), step=1, format="%d", key=f"mpn_{suffix}") 
-                
-                col_n3, col_n4 = st.columns(2)
-                min_tang = col_n3.number_input("Số Tầng", value=int(st.session_state.get('f_min_tang', 0.0)), step=1, format="%d", key=f"mtg_{suffix}") 
-                min_dt = col_n4.number_input("DT (m2)", value=float(st.session_state.f_min_dt), step=5.0, key=f"mdt_{suffix}") 
-                
-                st.write("**📍 Vị trí (HOẶC):**")
-                p1, p2 = st.columns(2)
-                f_mat = p1.checkbox("Mặt tiền", value="MAT" in st.session_state.f_tags, key=f"mat_{suffix}")
-                f_hxt = p2.checkbox("Xe Tải", value="HXT" in st.session_state.f_tags, key=f"hxt_{suffix}")
-                f_hxh = p1.checkbox("Xe Hơi", value="HXH" in st.session_state.f_tags, key=f"hxh_{suffix}")
-                f_hbg = p2.checkbox("Ba Gác", value="HBG" in st.session_state.f_tags, key=f"hbg_{suffix}")
+                min_n = float(st.session_state.get(f"mn_{suffix}", st.session_state.f_ngang))
+                min_pn = float(st.session_state.get(f"mpn_{suffix}", st.session_state.f_min_pn))
+                min_tang = float(st.session_state.get(f"mtg_{suffix}", st.session_state.get('f_min_tang', 0.0)))
+                min_dt = float(st.session_state.get(f"mdt_{suffix}", st.session_state.f_min_dt))
 
-                st.write("**💎 Đặc điểm (VÀ):**")
-                t1, t2 = st.columns(2)
-                f_tma = t1.checkbox("Thang máy", value="TMA" in st.session_state.f_tags, key=f"tma_{suffix}")
-                f_ntc = t2.checkbox("Nội thất", value="NTC" in st.session_state.f_tags, key=f"ntc_{suffix}")
-                f_klp = t1.checkbox("Không lỗi", value="KLP" in st.session_state.f_tags, key=f"klp_{suffix}")
-                f_2mt = t2.checkbox("2 Mặt tiền", value="2MT" in st.session_state.f_tags, key=f"2mt_{suffix}")
-                f_cgo = t1.checkbox("Căn góc", value="CGO" in st.session_state.f_tags, key=f"cgo_{suffix}")
-                f_ttt = t2.checkbox("Tây Tứ Trạch", value="TTT" in st.session_state.f_tags, key=f"ttt_{suffix}")
-                f_dtt = t1.checkbox("Đông Tứ Trạch", value="DTT" in st.session_state.f_tags, key=f"dtt_{suffix}")
+                f_mat = bool(st.session_state.get(f"mat_{suffix}", "MAT" in st.session_state.f_tags))
+                f_hxt = bool(st.session_state.get(f"hxt_{suffix}", "HXT" in st.session_state.f_tags))
+                f_hxh = bool(st.session_state.get(f"hxh_{suffix}", "HXH" in st.session_state.f_tags))
+                f_hbg = bool(st.session_state.get(f"hbg_{suffix}", "HBG" in st.session_state.f_tags))
 
-            with col_right:
-                st.subheader("3. Kết quả tìm kiếm")
+                f_tma = bool(st.session_state.get(f"tma_{suffix}", "TMA" in st.session_state.f_tags))
+                f_ntc = bool(st.session_state.get(f"ntc_{suffix}", "NTC" in st.session_state.f_tags))
+                f_klp = bool(st.session_state.get(f"klp_{suffix}", "KLP" in st.session_state.f_tags))
+                f_2mt = bool(st.session_state.get(f"2mt_{suffix}", "2MT" in st.session_state.f_tags))
+                f_cgo = bool(st.session_state.get(f"cgo_{suffix}", "CGO" in st.session_state.f_tags))
+                f_ttt = bool(st.session_state.get(f"ttt_{suffix}", "TTT" in st.session_state.f_tags))
+                f_dtt = bool(st.session_state.get(f"dtt_{suffix}", "DTT" in st.session_state.f_tags))
+
+                # --- 3. BẢNG KẾT QUẢ TÌM KIẾM (FULL-WIDTH TRÀN VIỀN) ---
+                st.subheader("3. Kết quả tìm kiếm (Kho Hàng Phù Hợp)")
                 args = (min_gia, max_gia, sel_q, sel_p, min_n, min_pn, min_tang, min_dt, f_tma, f_ntc, f_klp, f_ttt, f_dtt, f_2mt, f_cgo, f_mat, f_hxt, f_hxh, f_hbg)
                 results = filter_houses(df_h_clean, *args)
                 
@@ -2583,8 +2615,6 @@ def crm_main_interface():
                             
                             df_kids.loc[df_kids['KID'].astype(str) == str(kid_id), 'bo_loc_KID'] = new_blk
                             df_kids.to_csv(FILE_KID, index=False)
-                            
-                            #load_local_data.clear() 
                             st.toast("✅ Đã lưu bộ lọc thành công!")
                             
                     with btn_col3:
@@ -2597,7 +2627,6 @@ def crm_main_interface():
                                 if len(selected_uids) == 0:
                                     st.warning("⚠️ Vui lòng click chọn (🔘) ít nhất 1 căn nhà!")
                                 else:
-                                    # Remove black_list entries for selected houses before sending
                                     removed_bl_count = 0
                                     if not df_log.empty:
                                         for uid in selected_uids:
@@ -2647,20 +2676,16 @@ def crm_main_interface():
                                 if len(selected_uids) == 0:
                                     st.warning("⚠️ Vui lòng click chọn (🔘) ít nhất 1 căn nhà!")
                                 else:
-                                    # Save black list to KID_log
                                     if not df_log.empty:
                                         current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                                         for uid in selected_uids:
-                                            # Check if already exists
                                             existing_idx = df_log[(df_log.iloc[:, 0].astype(str).str.strip() == str(kid_id)) & 
                                                               (df_log.iloc[:, 1].astype(str).str.strip() == str(uid))].index
                                             
                                             if len(existing_idx) > 0:
-                                                # Update existing to black_list
                                                 df_log.loc[existing_idx[0], df_log.columns[4]] = "black_list"
                                                 df_log.loc[existing_idx[0], df_log.columns[5]] = current_time
                                             else:
-                                                # Add new black_list entry
                                                 new_row = {df_log.columns[0]: str(kid_id), 
                                                           df_log.columns[1]: str(uid),
                                                           df_log.columns[2]: "",
@@ -2696,7 +2721,6 @@ def crm_main_interface():
                                 else:
                                     selected_houses_df = results[results[u_key].isin(selected_uids)]
                                     dialog_chon_khach_cho_nha(selected_houses_df, df_kids, df_log)
-                    st.markdown("<br>", unsafe_allow_html=True)
                     
                     if not is_tim_mode:
                         if selected_uids:
@@ -2711,6 +2735,342 @@ def crm_main_interface():
                             st.info("💡 Đang ở chế độ chăm sóc. Bấm 🔘 trên bảng để đưa nhà vào khay gửi khách.")
                     else:
                         st.success("🔓 **Bảng đã được MỞ KHÓA TẤT CẢ.** Hãy tick (🔘) vào các siêu phẩm và bấm lại nút [🎯 TÌM KHÁCH] để AI chạy Matching.")
+
+                # --- 2. TINH CHỈNH BỘ LỌC (ĐƯA XUỐNG DƯỚI BẢNG NHÀ) ---
+                st.divider()
+                st.subheader("⚙️ 2. Tinh chỉnh bộ lọc nhu cầu")
+                if is_tim_mode:
+                    st.info("🔓 Kho hàng đang mở khóa toàn bộ. Bạn có thể tự chỉnh lọc bằng tay bên dưới để khoanh vùng.")
+
+                cf1, cf2, cf3, cf4 = st.columns(4)
+                cf1.number_input("Giá từ (Tỷ)", value=st.session_state.f_min_gia, step=1.0, key=f"mg_{suffix}")
+                cf2.number_input("Đến (Tỷ)", value=st.session_state.f_max_gia, step=1.0, key=f"xg_{suffix}")
+                cf3.multiselect("Chọn Quận", districts, default=valid_default_q, key=f"q_{suffix}")
+                cf4.multiselect("Chọn Phường", list_p, default=valid_default_p, key=f"p_{suffix}")
+
+                cf5, cf6, cf7, cf8 = st.columns(4)
+                cf5.number_input("Ngang (m)", value=st.session_state.f_ngang, step=1.0, key=f"mn_{suffix}")
+                cf6.number_input("Số PN", value=int(st.session_state.f_min_pn), step=1, format="%d", key=f"mpn_{suffix}") 
+                cf7.number_input("Số Tầng", value=int(st.session_state.get('f_min_tang', 0.0)), step=1, format="%d", key=f"mtg_{suffix}") 
+                cf8.number_input("DT (m2)", value=float(st.session_state.f_min_dt), step=5.0, key=f"mdt_{suffix}") 
+
+                col_vitri, col_dacdiem = st.columns(2)
+                with col_vitri:
+                    st.write("**📍 Vị trí (HOẶC):**")
+                    p1, p2, p3, p4 = st.columns(4)
+                    p1.checkbox("Mặt tiền", value="MAT" in st.session_state.f_tags, key=f"mat_{suffix}")
+                    p2.checkbox("Xe Tải", value="HXT" in st.session_state.f_tags, key=f"hxt_{suffix}")
+                    p3.checkbox("Xe Hơi", value="HXH" in st.session_state.f_tags, key=f"hxh_{suffix}")
+                    p4.checkbox("Ba Gác", value="HBG" in st.session_state.f_tags, key=f"hbg_{suffix}")
+
+                with col_dacdiem:
+                    st.write("**💎 Đặc điểm (VÀ):**")
+                    t1, t2, t3, t4, t5, t6, t7 = st.columns(7)
+                    t1.checkbox("Thang máy", value="TMA" in st.session_state.f_tags, key=f"tma_{suffix}")
+                    t2.checkbox("Nội thất", value="NTC" in st.session_state.f_tags, key=f"ntc_{suffix}")
+                    t3.checkbox("Không lỗi", value="KLP" in st.session_state.f_tags, key=f"klp_{suffix}")
+                    t4.checkbox("2 MT", value="2MT" in st.session_state.f_tags, key=f"2mt_{suffix}")
+                    t5.checkbox("Căn góc", value="CGO" in st.session_state.f_tags, key=f"cgo_{suffix}")
+                    t6.checkbox("TTT", value="TTT" in st.session_state.f_tags, key=f"ttt_{suffix}")
+                    t7.checkbox("DTT", value="DTT" in st.session_state.f_tags, key=f"dtt_{suffix}")
+
+            else:
+                # -----------------------------------------------------
+                # GIAO DIỆN LOCAL: GIỮ NGUYÊN BỐ CỤC 2 CỘT (COL_LEFT / COL_RIGHT)
+                # -----------------------------------------------------
+                col_left, col_right = st.columns([1, 3])
+                
+                with col_left:
+                    st.subheader("1. Chọn khách" if not is_tim_mode else "1. Rổ hàng (Đã Mở Khóa)")
+                    
+                    filter_col, select_col = st.columns([1, 2.5])
+                    selected_filter = filter_col.selectbox("Lọc mức độ:", filter_options, disabled=is_tim_mode)
+                    
+                    if selected_filter == "Tất cả (A,B,C)":
+                        df_kids_active = df_kids[df_kids['PLK'].astype(str).str.strip().str.upper() != 'D'].copy()
+                    elif selected_filter == "Khách D (Đã bỏ)":
+                        df_kids_active = df_kids[df_kids['PLK'].astype(str).str.strip().str.upper() == 'D'].copy()
+                    else:
+                        target_plk = selected_filter.replace("Khách ", "").strip()
+                        df_kids_active = df_kids[df_kids['PLK'].astype(str).str.strip().str.upper() == target_plk].copy()
+                    
+                    kid_mapping = {}
+                    for _, row in df_kids_active.iterrows():
+                        k = str(row.get('KID', '')).strip()
+                        plk = str(row.get('PLK', '')).strip().upper()
+                        ttk = str(row.get('thongtin_KID', '')).strip()
+                        plk_str = f"({plk})" if plk else ""
+                        display_str = f"{k}{plk_str}. {ttk}"
+                        kid_mapping[display_str] = k
+                        
+                    kid_list = list(kid_mapping.keys())
+                    if not kid_list:
+                        select_col.warning(f"Không có {selected_filter.lower()}.")
+                        st.stop()
+                        
+                    selectbox_key = f"kid_selectbox_{selected_filter}"
+                    if selectbox_key not in st.session_state or st.session_state[selectbox_key] not in kid_list:
+                        default_val = kid_list[0]
+                        if st.session_state.get('last_saved_kid'):
+                            for display_name in kid_list:
+                                if kid_mapping[display_name] == st.session_state['last_saved_kid']:
+                                    default_val = display_name
+                                    break
+                        st.session_state[selectbox_key] = default_val
+
+                    selected_kid_str = select_col.selectbox(
+                        "Đang chăm sóc:", 
+                        kid_list, 
+                        disabled=is_tim_mode, 
+                        key=selectbox_key
+                    )
+                    
+                    kid_id = kid_mapping[selected_kid_str]
+                    if st.session_state['last_saved_kid'] != kid_id:
+                        try:
+                            with open(FILE_LAST_KID, "w", encoding="utf-8") as f:
+                                f.write(str(kid_id))
+                            st.session_state['last_saved_kid'] = kid_id
+                        except: pass
+                    
+                    kid_row = df_kids[df_kids['KID'].astype(str).str.strip() == str(kid_id)].iloc[0]
+                    if not is_tim_mode:
+                        ghi_chu_text = str(kid_row.get('ghi_chu', '')).strip()
+                        if ghi_chu_text and ghi_chu_text.lower() not in ['nan', 'none', 'null', '<na>']:
+                            st.info(f"📝 **Ghi chú / Lịch sử xem:**\n\n{ghi_chu_text}")
+
+                    blk_str = str(kid_row.get('bo_loc_KID', '')).strip()
+                    if blk_str.lower() in ['nan', 'none', '']:
+                        blk_str = str(kid_row.get('thongtin_KID', '')).strip()
+                    
+                    if ('active_kid' not in st.session_state or 
+                        st.session_state.active_kid != kid_id or 
+                        st.session_state.get('active_blk') != blk_str):
+                        
+                        st.session_state.active_kid = kid_id
+                        st.session_state.active_blk = blk_str
+                        
+                        if not is_tim_mode:
+                            prefs = parse_blk(blk_str)
+                            st.session_state.f_min_gia = float(prefs.get('min_gia', 0.0))
+                            parsed_max_gia = float(prefs.get('max_gia', 0.0))
+                            st.session_state.f_max_gia = parsed_max_gia if parsed_max_gia > 0 else 100.0
+                            st.session_state.f_ngang = float(prefs.get('min_ngang', 0.0))
+                            st.session_state.f_min_pn = float(prefs.get('min_pn', 0.0)) 
+                            st.session_state.f_min_tang = float(prefs.get('min_tang', 0.0)) 
+                            st.session_state.f_min_dt = float(prefs.get('min_dt', 0.0)) 
+                            
+                            q_codes = list(prefs.get('quan_phuong', {}).keys())
+                            st.session_state.f_quan = [REV_MAP_QUAN.get(q, q) for q in q_codes]
+                            st.session_state.f_phuong = [p for sub in prefs.get('quan_phuong', {}).values() for p in sub]
+                            st.session_state.f_tags = prefs.get('tags', [])
+
+                    suffix = "tim" if is_tim_mode else str(kid_id)
+
+                    st.subheader("2. Tinh chỉnh bộ lọc")
+                    if is_tim_mode:
+                        st.info("🔓 Kho hàng đang mở khóa toàn bộ. Bạn có thể tự chỉnh lọc bằng tay bên dưới để khoanh vùng.")
+                        
+                    min_gia = st.number_input("Giá từ (Tỷ)", value=st.session_state.f_min_gia, step=1.0, key=f"mg_{suffix}")
+                    max_gia = st.number_input("Đến (Tỷ)", value=st.session_state.f_max_gia, step=1.0, key=f"xg_{suffix}")
+                    
+                    valid_default_q = [q for q in st.session_state.f_quan if q in districts]
+                    sel_q = st.multiselect("Chọn Quận", districts, default=valid_default_q, key=f"q_{suffix}")
+                    
+                    list_p = active_houses[active_houses[CONFIG_GSK_CM["QUAN"]].str.title().isin(sel_q)][CONFIG_GSK_CM["PHUONG"]].astype(str).str.replace(r'\.0$', '', regex=True).unique().tolist() if sel_q else []
+                    valid_default_p = [p for p in st.session_state.f_phuong if p in list_p]
+                    sel_p = st.multiselect("Chọn Phường", list_p, default=valid_default_p, key=f"p_{suffix}")
+                    
+                    col_n1, col_n2 = st.columns(2)
+                    min_n = col_n1.number_input("Ngang (m)", value=st.session_state.f_ngang, step=1.0, key=f"mn_{suffix}")
+                    min_pn = col_n2.number_input("Số PN", value=int(st.session_state.f_min_pn), step=1, format="%d", key=f"mpn_{suffix}") 
+                    
+                    col_n3, col_n4 = st.columns(2)
+                    min_tang = col_n3.number_input("Số Tầng", value=int(st.session_state.get('f_min_tang', 0.0)), step=1, format="%d", key=f"mtg_{suffix}") 
+                    min_dt = col_n4.number_input("DT (m2)", value=float(st.session_state.f_min_dt), step=5.0, key=f"mdt_{suffix}") 
+                    
+                    st.write("**📍 Vị trí (HOẶC):**")
+                    p1, p2 = st.columns(2)
+                    f_mat = p1.checkbox("Mặt tiền", value="MAT" in st.session_state.f_tags, key=f"mat_{suffix}")
+                    f_hxt = p2.checkbox("Xe Tải", value="HXT" in st.session_state.f_tags, key=f"hxt_{suffix}")
+                    f_hxh = p1.checkbox("Xe Hơi", value="HXH" in st.session_state.f_tags, key=f"hxh_{suffix}")
+                    f_hbg = p2.checkbox("Ba Gác", value="HBG" in st.session_state.f_tags, key=f"hbg_{suffix}")
+
+                    st.write("**💎 Đặc điểm (VÀ):**")
+                    t1, t2 = st.columns(2)
+                    f_tma = t1.checkbox("Thang máy", value="TMA" in st.session_state.f_tags, key=f"tma_{suffix}")
+                    f_ntc = t2.checkbox("Nội thất", value="NTC" in st.session_state.f_tags, key=f"ntc_{suffix}")
+                    f_klp = t1.checkbox("Không lỗi", value="KLP" in st.session_state.f_tags, key=f"klp_{suffix}")
+                    f_2mt = t2.checkbox("2 Mặt tiền", value="2MT" in st.session_state.f_tags, key=f"2mt_{suffix}")
+                    f_cgo = t1.checkbox("Căn góc", value="CGO" in st.session_state.f_tags, key=f"cgo_{suffix}")
+                    f_ttt = t2.checkbox("Tây Tứ Trạch", value="TTT" in st.session_state.f_tags, key=f"ttt_{suffix}")
+                    f_dtt = t1.checkbox("Đông Tứ Trạch", value="DTT" in st.session_state.f_tags, key=f"dtt_{suffix}")
+
+                with col_right:
+                    st.subheader("3. Kết quả tìm kiếm")
+                    args = (min_gia, max_gia, sel_q, sel_p, min_n, min_pn, min_tang, min_dt, f_tma, f_ntc, f_klp, f_ttt, f_dtt, f_2mt, f_cgo, f_mat, f_hxt, f_hxh, f_hbg)
+                    results = filter_houses(df_h_clean, *args)
+                    
+                    if not results.empty:
+                        st.success(f"🔍 Tìm thấy **{len(results)}** căn thỏa tiêu chí!")
+                        edited_df = render_aggrid(results, df_log, kid_id)
+                        
+                        st.divider()
+                        st.subheader("4. Tác vụ xử lý")
+                        
+                        u_key = CONFIG_GSK_CM["UID"]
+                        selected_uids = edited_df[edited_df['Trạng thái'] == '🔘 Đã chọn'][u_key].tolist()
+                        
+                        btn_col1, btn_col2, btn_col3, btn_col4, btn_col5 = st.columns(5)
+                        
+                        with btn_col1:
+                            if st.button("🔄 LÀM MỚI BẢNG", use_container_width=True):
+                                pull_latest_houses_only()
+                                st.cache_data.clear()
+                                st.session_state['refresh_counter'] = st.session_state.get('refresh_counter', 0) + 1
+                                st.rerun()
+                                
+                        with btn_col2:
+                            if st.button("💾 LƯU BỘ LỌC", use_container_width=True, disabled=is_tim_mode):
+                                d_qp = {}
+                                for q in sel_q:
+                                    q_code = MAP_QUAN.get(q, f"Q{q.replace('Quận ', '').replace(' ', '').upper()}")
+                                    d_qp[q_code] = [str(p) for p in sel_p]
+                                
+                                tags = [t for t, v in zip(["MAT","HXT","HXH","HBG","TMA","NTC","KLP","TTT","DTT","2MT","CGO"], 
+                                                          [f_mat, f_hxt, f_hxh, f_hbg, f_tma, f_ntc, f_klp, f_ttt, f_dtt, f_2mt, f_cgo]) if v]
+                                
+                                old_blk = str(df_kids.loc[df_kids['KID'].astype(str) == str(kid_id), 'bo_loc_KID'].values[0])
+                                if not old_blk or old_blk == 'nan': 
+                                    old_blk = str(df_kids.loc[df_kids['KID'].astype(str) == str(kid_id), 'thongtin_KID'].values[0])
+                                
+                                name_kh = parse_blk(old_blk).get('ten', 'Khach')
+                                new_blk = build_blk(name_kh, min_gia, max_gia, d_qp, min_n, min_pn, min_tang, min_dt, tags)
+                                
+                                df_kids.loc[df_kids['KID'].astype(str) == str(kid_id), 'bo_loc_KID'] = new_blk
+                                df_kids.to_csv(FILE_KID, index=False)
+                                
+                                st.toast("✅ Đã lưu bộ lọc thành công!")
+                                
+                        with btn_col3:
+                            if st.button("📤 GỬI KHÁCH", type="primary" if not is_tim_mode else "secondary", use_container_width=True):
+                                if is_tim_mode:
+                                    st.session_state['app_mode'] = 'GUI_KHACH'
+                                    st.session_state['active_kid'] = ""
+                                    st.rerun()
+                                else:
+                                    if len(selected_uids) == 0:
+                                        st.warning("⚠️ Vui lòng click chọn (🔘) ít nhất 1 căn nhà!")
+                                    else:
+                                        removed_bl_count = 0
+                                        if not df_log.empty:
+                                            for uid in selected_uids:
+                                                bl_idx = df_log[(df_log.iloc[:, 0].astype(str).str.strip() == str(kid_id)) & 
+                                                              (df_log.iloc[:, 1].astype(str).str.strip() == str(uid)) &
+                                                              (df_log.iloc[:, 4].astype(str).str.strip() == 'black_list')].index
+                                                if len(bl_idx) > 0:
+                                                    df_log = df_log.drop(bl_idx[0])
+                                                    removed_bl_count += 1
+                                            
+                                            if removed_bl_count > 0:
+                                                df_log.to_csv(FILE_LOG, index=False)
+                                        
+                                        schedule_dict = {}
+                                        for uid in selected_uids:
+                                            schedule_dict[uid] = st.session_state.get(f"d_{uid}", datetime.now().date())
+                                            
+                                        d_qp = {}
+                                        for q in sel_q:
+                                            q_code = MAP_QUAN.get(q, f"Q{q.replace('Quận ', '').replace(' ', '').upper()}")
+                                            d_qp[q_code] = [str(p) for p in sel_p]
+                                        
+                                        tags = [t for t, v in zip(["MAT","HXT","HXH","HBG","TMA","NTC","KLP","TTT","DTT","2MT","CGO"], 
+                                                                  [f_mat, f_hxt, f_hxh, f_hbg, f_tma, f_ntc, f_klp, f_ttt, f_dtt, f_2mt, f_cgo]) if v]
+                                        kid_row = df_kids[df_kids['KID'].astype(str).str.strip() == str(kid_id)]
+                                        if not kid_row.empty:
+                                            ttk_col = next((c for c in df_kids.columns if 'thongtin' in c.lower() or 'ttk' in c.lower()), df_kids.columns[1])
+                                            ttk_value = str(kid_row[ttk_col].values[0])
+                                            name_kh = ttk_value.split('.')[0] if '.' in ttk_value else ttk_value
+                                        else:
+                                            name_kh = str(kid_id)
+                                        
+                                        new_blk = build_blk(name_kh, min_gia, max_gia, d_qp, min_n, min_pn, min_tang, min_dt, tags)
+                                        df_kids.loc[df_kids['KID'].astype(str) == str(kid_id), 'bo_loc_KID'] = new_blk
+                                        df_kids.to_csv(FILE_KID, index=False)
+                                        
+                                        is_success = save_pending_logs(schedule_dict, kid_id, df_kids)
+                                        if is_success:
+                                            st.session_state['refresh_counter'] = st.session_state.get('refresh_counter', 0) + 1
+                                            st.rerun()
+                        
+                        with btn_col4:
+                            if st.button("🔴 BLACK LIST", type="secondary", use_container_width=True):
+                                if is_tim_mode:
+                                    st.warning("⚠️ Vui lòng chọn khách hàng trước!")
+                                else:
+                                    if len(selected_uids) == 0:
+                                        st.warning("⚠️ Vui lòng click chọn (🔘) ít nhất 1 căn nhà!")
+                                    else:
+                                        if not df_log.empty:
+                                            current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                                            for uid in selected_uids:
+                                                existing_idx = df_log[(df_log.iloc[:, 0].astype(str).str.strip() == str(kid_id)) & 
+                                                                  (df_log.iloc[:, 1].astype(str).str.strip() == str(uid))].index
+                                                
+                                                if len(existing_idx) > 0:
+                                                    df_log.loc[existing_idx[0], df_log.columns[4]] = "black_list"
+                                                    df_log.loc[existing_idx[0], df_log.columns[5]] = current_time
+                                                else:
+                                                    new_row = {df_log.columns[0]: str(kid_id), 
+                                                              df_log.columns[1]: str(uid),
+                                                              df_log.columns[2]: "",
+                                                              df_log.columns[3]: "",
+                                                              df_log.columns[4]: "black_list",
+                                                              df_log.columns[5]: current_time}
+                                                    df_log = pd.concat([df_log, pd.DataFrame([new_row])], ignore_index=True)
+                                            
+                                            df_log.to_csv(FILE_LOG, index=False)
+                                            st.toast(f"✅ Đã thêm {len(selected_uids)} nhà vào Black List!")
+                                            st.session_state['refresh_counter'] = st.session_state.get('refresh_counter', 0) + 1
+                                            st.rerun()
+                                        else:
+                                            st.warning("⚠️ Chưa có dữ liệu log!")
+
+                        with btn_col5:
+                            if st.button("🎯 TÌM KHÁCH", type="primary" if is_tim_mode else "secondary", use_container_width=True):
+                                if not is_tim_mode:
+                                    st.session_state['app_mode'] = 'TIM_KHACH'
+                                    st.session_state.f_min_gia = 0.0
+                                    st.session_state.f_max_gia = 1000.0 
+                                    st.session_state.f_ngang = 0.0
+                                    st.session_state.f_min_pn = 0.0
+                                    st.session_state.f_min_tang = 0.0
+                                    st.session_state.f_min_dt = 0.0
+                                    st.session_state.f_quan = []
+                                    st.session_state.f_phuong = []
+                                    st.session_state.f_tags = []
+                                    st.rerun()
+                                else:
+                                    if not selected_uids:
+                                        st.warning("⚠️ Vui lòng click chọn (🔘) ít nhất 1 căn nhà trước!")
+                                    else:
+                                        selected_houses_df = results[results[u_key].isin(selected_uids)]
+                                        dialog_chon_khach_cho_nha(selected_houses_df, df_kids, df_log)
+                        st.markdown("<br>", unsafe_allow_html=True)
+                        
+                        if not is_tim_mode:
+                            if selected_uids:
+                                st.write("🗓️ **Chọn ngày hẹn cho các căn sắp gửi:**")
+                                original_selected = results[results[u_key].isin(selected_uids)]
+                                for _, row in original_selected.iterrows():
+                                    uid = row[u_key]
+                                    cols = st.columns([3, 2])
+                                    cols[0].write(f"🏠 {row[CONFIG_GSK_CM['SONHA']]} {row[CONFIG_GSK_CM['TENDUONG']]} - {row[CONFIG_GSK_CM['GIA']]}T")
+                                    cols[1].date_input("Hẹn:", key=f"d_{uid}", label_visibility="collapsed")
+                            else:
+                                st.info("💡 Đang ở chế độ chăm sóc. Bấm 🔘 trên bảng để đưa nhà vào khay gửi khách.")
+                        else:
+                            st.success("🔓 **Bảng đã được MỞ KHÓA TẤT CẢ.** Hãy tick (🔘) vào các siêu phẩm và bấm lại nút [🎯 TÌM KHÁCH] để AI chạy Matching.")
 
     with tab2:
         st.header("👥 Danh Sách MyKID (Radar Chăm Sóc)")
