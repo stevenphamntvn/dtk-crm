@@ -9,6 +9,7 @@ import json
 import re
 import subprocess
 import tempfile
+import platform
 
 from st_aggrid import AgGrid, GridOptionsBuilder, JsCode
 from st_aggrid.shared import GridUpdateMode, DataReturnMode
@@ -37,15 +38,21 @@ inject_pwa_scripts()
 # ==========================================
 # CẤU HÌNH NHẬN DIỆN Ổ ĐĨA & HÀM HỖ TRỢ BẢN ĐỊA
 # ==========================================
-path_pc = r"D:\GGD\My Drive\Real estate\QH-SH-MAP\SH\SH Total"
-path_laptop = r"G:\My Drive\Real estate\QH-SH-MAP\SH\SH Total"
+# Detect if running on Streamlit Cloud (Linux environment)
+IS_CLOUD = os.environ.get('STREAMLIT_SERVER', '') != '' or platform.system() != 'Windows'
 
-if os.path.exists(path_pc):
-    ROOT_DIR = path_pc
-elif os.path.exists(path_laptop):
-    ROOT_DIR = path_laptop
+if IS_CLOUD:
+    ROOT_DIR = ""  # Cloud environment doesn't have local file access
 else:
-    ROOT_DIR = "" # Fallback an toàn nếu không tìm thấy thư mục
+    path_pc = r"D:\GGD\My Drive\Real estate\QH-SH-MAP\SH\SH Total"
+    path_laptop = r"G:\My Drive\Real estate\QH-SH-MAP\SH\SH Total"
+
+    if os.path.exists(path_pc):
+        ROOT_DIR = path_pc
+    elif os.path.exists(path_laptop):
+        ROOT_DIR = path_laptop
+    else:
+        ROOT_DIR = "" # Fallback an toàn nếu không tìm thấy thư mục
 
 def remove_vietnamese_accent(s):
     """Gọt sạch dấu tiếng Việt để đối chiếu với cấu trúc Folder Windows"""
@@ -1570,7 +1577,10 @@ def render_aggrid(results, df_log, kid_id):
                     folder_path = os.path.join(ROOT_DIR, quan_c, duong_c, f"{sonha_c} {duong_c}")
                     if os.path.exists(folder_path):
                         folder_path_clean = os.path.normpath(folder_path)
-                        subprocess.Popen(f'explorer "{folder_path_clean}"')
+                        if IS_CLOUD:
+                            st.toast(f"📂 Folder path (Cloud): {folder_path_clean}", icon="ℹ️")
+                        else:
+                            subprocess.Popen(f'explorer "{folder_path_clean}"')
                     else:
                         st.toast(f"⚠️ Thư mục không tồn tại: {sonha_c} {duong_c}", icon="⚠️")
 
@@ -1875,7 +1885,10 @@ def render_tab3_ui(df_display):
                     folder_path = os.path.join(ROOT_DIR, quan_c, duong_c, f"{sonha_c} {duong_c}")
                     if os.path.exists(folder_path):
                         folder_path_clean = os.path.normpath(folder_path)
-                        subprocess.Popen(f'explorer "{folder_path_clean}"')
+                        if IS_CLOUD:
+                            st.toast(f"📂 Folder path (Cloud): {folder_path_clean}", icon="ℹ️")
+                        else:
+                            subprocess.Popen(f'explorer "{folder_path_clean}"')
                     else:
                         st.toast(f"⚠️ Thư mục không tồn tại: {sonha_c} {duong_c}", icon="⚠️")
 
