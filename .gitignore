@@ -67,3 +67,8 @@ package-lock.json
 # Environment
 .env
 .env.local
+
+# Documentation and temporary files
+NEXT_STEPS.md
+streamlit_secrets.txt
+convert_credentials.py
