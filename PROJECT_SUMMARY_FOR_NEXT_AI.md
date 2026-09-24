@@ -97,6 +97,8 @@ DTK_CRM/
   * `🔘 Tick chọn`: Đưa căn nhà vào khay gửi khách.
   * `🗺️ Quy hoạch`: Double click số nhà để mở link bản đồ quy hoạch (`URL_Quy_Hoach`).
   * `📂 GGD (Mới)`: Cột riêng nằm giữa `sonha` và `tenduong`, click mở thẳng thư mục ảnh Google Drive của căn nhà.
+  * `🏷️ Đặc điểm (dacdiem)`: Tự động trích xuất các tag cố định và tag động từ `motachitiet`: `PNxx` (PN5), `SCNxx` (SCN97), `SLGxx` (SLG26), `QHxx` (QH10), `DTNxx` (DTN4), `SA4`, `2MT`, `TTT`, `DTT`, `NTC`, `KLP`, v.v.
+  * `📝 Ghi chú (note_rieng)`: Cột mới nằm ở vị trí cuối cùng của bảng, tự động bóc tách nội dung ghi chú riêng `N(...)` từ cột `motachitiet`.
   * `🎯 Chốt lịch gửi`: Nhập ngày hẹn và đẩy vào danh sách gửi (`save_pending_logs`).
 * **Tối ưu hóa Bố cục Full-Width (Cloud vs Local)**:
   * **Trên Cloud / Tablet**: Khung kết quả hiển thị nhà kéo dài 100% Full-Width từ trái qua phải; phần chọn khách đặt ở thanh gọn phía trên, còn phần *2. Tinh chỉnh bộ lọc* được đưa xuống dưới bảng nhà giúp Advisor quan sát rổ hàng rộng rãi tối đa trên màn hình tablet.

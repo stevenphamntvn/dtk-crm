@@ -306,6 +306,7 @@ UI_WIDTH = {
     "t1_update": 90,
     "t1_uid": 50,
     "t1_cus": 120,
+    "t1_note": 250, # Cột Ghi chú riêng N(...) nằm ở cuối cùng bảng
 
     # --- TAB 2: MYKID ---
     "t2_kid": 120,
@@ -1182,15 +1183,30 @@ def filter_houses(df_houses, min_gia, max_gia, selected_quan, selected_phuong, m
             res = res.sort_values(by='rank')
 
     if not res.empty and c_mota in res.columns:
-        tags = ["TOH", "2MT", "CGO", "P1C", "T1C", "GAC", "GCH", "DAD", "NTC", "SA4", "NOH", "MTR", "QHH", "TTT", "DTT", "CVI","GCV", "VLA", "VPH"]
+        tags = ["TOH", "2MT", "CGO", "P1C", "T1C", "GAC", "GCH", "DAD", "NTC", "SA4", "NOH", "MTR", "QHH", "TTT", "DTT", "CVI", "GCV", "VLA", "VPH", "TMA", "MAT", "HXT", "HXH", "HBG", "KLP"]
         def extract_highlight(text):
+            if not text or pd.isna(text): return ""
             t_upper = str(text).upper()
             found = [t for t in tags if t in t_upper]
-            pn_match = re.search(r'PN\d+', t_upper)
-            if pn_match: found.append(pn_match.group(0))
+            # Trích xuất các tag động theo mẫu Regex: PNxx, SCNxx, SLGxx, QHxx, DTNxx
+            dynamic_matches = re.findall(r'(PN\d+|SCN\d+|SLG\d+|QH\d+|DTN\d+)', t_upper)
+            for m in dynamic_matches:
+                if m not in found:
+                    found.append(m)
             return ", ".join(found)
+
+        def extract_note(text):
+            if not text or pd.isna(text): return ""
+            s = str(text)
+            match = re.search(r'(?i)N\(([\s\S]*?)\)(?:\s*$|\n|\r)', s)
+            if not match:
+                match = re.search(r'(?i)N\(([\s\S]*?)\)', s)
+            if match:
+                return match.group(1).strip()
+            return ""
             
         res['dacdiem'] = res[c_mota].apply(extract_highlight)
+        res['note_rieng'] = res[c_mota].apply(extract_note)
     
     return res
 
@@ -1711,12 +1727,18 @@ def render_aggrid(results, df_log, kid_id):
     # Tạo cột hiển thị nút GGD (gán nhãn 📂 nếu có link, ngược lại để trống)
     results['GGD'] = results[c_link_ggd_hidden].apply(lambda x: '📂' if str(x).strip().startswith('http') else '📁')
 
+    # Trích xuất dacdiem và note_rieng nếu chưa có
+    if 'dacdiem' not in results.columns and c_mota in results.columns:
+        results['dacdiem'] = results[c_mota].apply(extract_highlight)
+    if 'note_rieng' not in results.columns and c_mota in results.columns:
+        results['note_rieng'] = results[c_mota].apply(extract_note)
+
     # Danh sách hiển thị dùng TÊN CỘT THỰC TẾ
     display_cols = [
         'Trạng thái', c_pl, c_quan, c_phuong, 
         c_sonha, 'GGD', c_tenduong, c_ngang, 
         c_dai, c_dt, c_gia, 'Định giá', c_ketcau, 
-        'dacdiem', c_update, c_uid, c_cus, 
+        'dacdiem', c_update, c_uid, c_cus, 'note_rieng',
         c_link_hidden, c_link_ggd_hidden
     ]
     
@@ -1778,6 +1800,9 @@ def render_aggrid(results, df_log, kid_id):
     gb.configure_column(c_cus, header_name="📋 Copy TT", width=UI_WIDTH["t1_cus"], minWidth=UI_WIDTH["t1_cus"], maxWidth=UI_WIDTH["t1_cus"],
                         onCellClicked=js["copy_cus"], 
                         cellStyle={'cursor': 'pointer', 'color': '#007bff', 'textDecoration': 'underline'})
+
+    gb.configure_column('note_rieng', header_name="📝 Ghi chú", width=UI_WIDTH.get("t1_note", 250), minWidth=180, resizable=True, 
+                        cellStyle={'color': '#f59e0b', 'fontWeight': '500'})
 
     gb.configure_column('_folder_trigger', hide=True)
     gb.configure_column(c_link_hidden, hide=True)
