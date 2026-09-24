@@ -10,6 +10,7 @@ import re
 import subprocess
 import tempfile
 import platform
+import hashlib
 
 from st_aggrid import AgGrid, GridOptionsBuilder, JsCode
 from st_aggrid.shared import GridUpdateMode, DataReturnMode
@@ -2248,13 +2249,19 @@ def save_pending_logs(schedule_dict, kid_id, df_kids):
         st.error(f"Lỗi ghi log: {e}")
         return False
 # ==========================================
-# 3.5. XÁC THỰC ĐĂNG NHẬP (CHỈ ÁP DỤNG BẢN CLOUD)
+# 3.5. XÁC THỰC ĐĂNG NHẬP & DUY TRÌ PHIÊN (PERSISTENT CLOUD AUTH)
 # ==========================================
+def generate_auth_token(username, password):
+    """Tạo mã token chữ ký xác thực phiên làm việc an toàn"""
+    raw = f"DTK_AUTH_{username}_{password}_SECURE_TOKEN_2025"
+    return hashlib.sha256(raw.encode('utf-8')).hexdigest()[:24]
+
 def check_authentication():
-    """Bắt buộc đăng nhập khi chạy trên Cloud; Local tự động bỏ qua"""
+    """Bắt buộc đăng nhập khi chạy trên Cloud; tự động ghi nhớ phiên trên Tablet khi F5/reload"""
     if not IS_CLOUD:
         return True
 
+    # 1. Đã xác thực trong session hiện tại
     if st.session_state.get('authenticated', False):
         return True
 
@@ -2278,7 +2285,40 @@ def check_authentication():
     if not valid_users:
         valid_users = {"admin": "dtk@2025"}
 
-    # Giao diện Form Đăng Nhập
+    # 2. Tự động phục hồi phiên đăng nhập từ URL Query Params (Giữ đăng nhập khi F5)
+    try:
+        if hasattr(st, "query_params"):
+            q_user = str(st.query_params.get("u", "")).strip()
+            q_auth = str(st.query_params.get("auth", "")).strip()
+            if q_user and q_auth and q_user in valid_users:
+                expected_auth = generate_auth_token(q_user, valid_users[q_user])
+                if q_auth == expected_auth:
+                    st.session_state['authenticated'] = True
+                    st.session_state['logged_in_user'] = q_user
+                    return True
+    except Exception:
+        pass
+
+    # 3. Tự động phục hồi phiên từ Browser LocalStorage (Giữ đăng nhập khi mở lại web/PWA)
+    auto_restore_js = """
+    <script>
+    (function() {
+        try {
+            const u = localStorage.getItem("dtk_crm_user");
+            const token = localStorage.getItem("dtk_crm_token");
+            if (u && token && !window.location.search.includes("auth=")) {
+                const url = new URL(window.location.href);
+                url.searchParams.set("u", u);
+                url.searchParams.set("auth", token);
+                window.location.replace(url.toString());
+            }
+        } catch(e) {}
+    })();
+    </script>
+    """
+    st.markdown(auto_restore_js, unsafe_allow_html=True)
+
+    # 4. Giao diện Form Đăng Nhập
     _, col_login, _ = st.columns([1, 1.3, 1])
     with col_login:
         st.markdown("<br><br>", unsafe_allow_html=True)
@@ -2289,14 +2329,36 @@ def check_authentication():
         with st.form("cloud_login_form", clear_on_submit=False):
             username_input = st.text_input("👤 Tên đăng nhập:", placeholder="Nhập tên tài khoản...").strip()
             password_input = st.text_input("🔑 Mật khẩu:", type="password", placeholder="Nhập mật khẩu...").strip()
+            remember_me = st.checkbox("Ghi nhớ đăng nhập trên thiết bị này", value=True)
             
             st.markdown("<br>", unsafe_allow_html=True)
             submitted = st.form_submit_button("🚀 ĐĂNG NHẬP", use_container_width=True, type="primary")
 
             if submitted:
                 if username_input in valid_users and valid_users[username_input] == password_input:
+                    auth_token = generate_auth_token(username_input, password_input)
                     st.session_state['authenticated'] = True
                     st.session_state['logged_in_user'] = username_input
+                    
+                    # Lưu vào Query Params
+                    try:
+                        if hasattr(st, "query_params"):
+                            st.query_params["u"] = username_input
+                            st.query_params["auth"] = auth_token
+                    except Exception:
+                        pass
+                        
+                    # Lưu vào LocalStorage
+                    if remember_me:
+                        st.markdown(f"""
+                        <script>
+                        try {{
+                            localStorage.setItem("dtk_crm_user", "{username_input}");
+                            localStorage.setItem("dtk_crm_token", "{auth_token}");
+                        }} catch(e) {{}}
+                        </script>
+                        """, unsafe_allow_html=True)
+                        
                     st.toast(f"✅ Chào mừng {username_input} đã đăng nhập thành công!", icon="🎉")
                     st.rerun()
                 else:
@@ -2348,6 +2410,22 @@ with st.sidebar:
         if st.button("🚪 Đăng Xuất", use_container_width=True):
             st.session_state['authenticated'] = False
             st.session_state.pop('logged_in_user', None)
+            try:
+                if hasattr(st, "query_params"):
+                    st.query_params.clear()
+            except Exception:
+                pass
+            st.markdown("""
+            <script>
+            try {
+                localStorage.removeItem("dtk_crm_user");
+                localStorage.removeItem("dtk_crm_token");
+                const url = new URL(window.location.href);
+                url.search = '';
+                window.history.replaceState({}, document.title, url.toString());
+            } catch(e) {}
+            </script>
+            """, unsafe_allow_html=True)
             st.rerun()
 
 @st.fragment

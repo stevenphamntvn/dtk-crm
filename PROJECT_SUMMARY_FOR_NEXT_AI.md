@@ -130,12 +130,13 @@ DTK_CRM/
 | **Mở File Explorer**| Chạy `explorer "path"` | Thông báo Toast / Link web |
 | **Đồng bộ dữ liệu** | Trạm Kiểm Duyệt KK (So sánh diff trước khi Push/Pull) | Có nút Reset All và Sync 2 chiều |
 
-### 🔒 Luồng Đăng Nhập trên Cloud:
+### 🔒 Luồng Đăng Nhập & Duy Trì Phiên (Persistent Cloud Auth):
 1. `check_authentication()` kiểm tra `IS_CLOUD`. Nếu `False` $\rightarrow$ Cho qua.
-2. Nếu `True` và chưa có session: Dừng vẽ toàn bộ UI (`st.stop()`) và hiển thị Form Đăng nhập giữa màn hình.
-3. Tài khoản được đối chiếu với `st.secrets["users"]` (hoặc fallback `admin / dtk@2025`).
-4. Khi đăng nhập thành công, session được lưu vào `st.session_state['authenticated'] = True`.
-5. Sidebar hiển thị tên User và nút **🚪 Đăng Xuất**.
+2. Kiểm tra `st.session_state['authenticated']`. Nếu đã đăng nhập $\rightarrow$ Cho qua.
+3. Kiểm tra URL Query Params `?u=...&auth=...`: Sử dụng hàm `generate_auth_token()` để so khớp chữ ký SHA-256 an toàn với `valid_users`. Nếu khớp $\rightarrow$ Tự động đăng nhập lại ngay lập tức khi người dùng F5/tải lại trang trên tablet.
+4. Kiểm tra `localStorage` của trình duyệt: Nếu mở lại web/PWA từ màn hình chính mà không có query param, JS tự động inject token vào URL để khôi phục phiên làm việc mà không bắt nhập lại mật khẩu.
+5. Nếu chưa có thông tin xác thực: Dừng vẽ toàn bộ UI (`st.stop()`) và hiển thị Form Đăng nhập giữa màn hình.
+6. Khi bấm nút **🚪 Đăng Xuất**: Hệ thống xóa toàn bộ `session_state`, xóa sạch `query_params`, và xóa toàn bộ key trong `localStorage` của trình duyệt để đăng xuất hoàn toàn.
 
 ---
 
