@@ -1,0 +1,29 @@
+Tôi chuẩn bị chuyển sang một luồng chat mới để giải phóng bộ nhớ và giúp hệ thống hoạt động mượt mà hơn. Dựa trên toàn bộ quá trình chúng ta đã xây dựng và sửa đổi code từ đầu luồng đến giờ, hãy đóng vai một Tech Lead và viết cho tôi một bản "Tóm tắt Bàn giao" (Handover Context) thật đầy đủ, chi tiết và sắc bén.
+
+Bản tóm tắt này sẽ được tôi dán vào phần đầu của siêu file `ai_context.md` để khởi tạo não bộ cho AI ở luồng chat mới. 
+
+Hãy format theo đúng cấu trúc Markdown dưới đây:
+
+**1. 🎯 Bối cảnh & Mục tiêu dự án:**
+(Tóm tắt ứng dụng này làm gì, phục vụ ai, dùng tech-stack cốt lõi nào - ví dụ: Streamlit, Pandas, Gspread, AgGrid).
+
+**2. 📖 Từ điển Thuật ngữ & Ký hiệu (Domain Knowledge):**
+(Liệt kê và giải thích các thuật ngữ chuyên ngành, mã quy ước, thẻ tag đang dùng trong hệ thống. Ví dụ: KID (Mã khách), UID (Mã nhà), các tag đặc điểm như NOH, TMA, TOH, PL (Pháp lý), ý nghĩa các trạng thái '✅ Đã gửi', '🔴 Chưa gửi'...).
+
+**3. 🧠 Luồng Dữ liệu & Logic Xử lý Cốt lõi (Core Business Logic):**
+(Mô tả chi tiết cách hệ thống vận hành. Ví dụ: 
+- Logic lọc nhà hoạt động ra sao (quy tắc giá, bề ngang, phường/quận...).
+- Luồng đồng bộ dữ liệu (Sync) từ Offline (CSV/JSON) lên Google Sheets hoạt động theo thứ tự nào.
+- Cơ chế chống trùng lặp khi gửi nhà cho khách được xử lý ra sao.
+- Cách AgGrid tương tác và cập nhật trạng thái ngược lại vào dataframe).
+
+**4. ⚙️ Cơ chế & Quy tắc Kỹ thuật Tuyệt đối (Strict Rules):**
+(Liệt kê các quy tắc viết code TUYỆT ĐỐI KHÔNG ĐƯỢC PHÁ VỠ. Ví dụ: Bắt buộc dùng đường dẫn tương đối `os.path` trỏ về thư mục 'data', thao tác với file cache offline thay vì gọi API liên tục, cấu trúc lưu trữ `filter_prefs.json`...).
+
+**5. 🚀 Tiến độ hiện tại (Completed):**
+(Gạch đầu dòng ngắn gọn những module, giao diện (Tabs), hoặc tính năng đã chạy hoàn toàn ổn định và được chốt hạ).
+
+**6. 🚧 Task đang làm dở / Lỗi cần xử lý ngay (Pending/Bugs):**
+(Tóm tắt ĐÚNG TRỌNG TÂM vấn đề cuối cùng chúng ta đang thảo luận, tính năng chuẩn bị viết tiếp, hoặc lỗi cụ thể đang bị kẹt trước khi dừng luồng chat này).
+
+Yêu cầu: Viết súc tích, chuyên nghiệp, đi sâu vào bản chất kỹ thuật và logic. Trả về kết quả là code block Markdown để tôi dễ dàng copy.
