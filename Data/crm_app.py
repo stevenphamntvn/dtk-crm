@@ -294,7 +294,7 @@ UI_WIDTH = {
     "t1_quan": 60,
     "t1_phuong": 42,
     "t1_sonha": 90, # Cột số nhà tùy chỉnh theo ý muốn
-    "t1_ggd": 45,   # Cột Link ảnh Google Drive (Nằm giữa Số nhà và Tên đường)
+    "t1_ggd": 50,   # Cột Link ảnh Google Drive (Nằm giữa Số nhà và Tên đường)
     "t1_tenduong": 120,
     "t1_ngang": 40,
     "t1_dai": 40,
@@ -306,7 +306,7 @@ UI_WIDTH = {
     "t1_update": 90,
     "t1_uid": 50,
     "t1_cus": 120,
-    "t1_note": 250, # Cột Ghi chú riêng N(...) nằm ở cuối cùng bảng
+    "t1_note": 650, # Cột Ghi chú riêng N(...) nằm ở cuối cùng bảng
 
     # --- TAB 2: MYKID ---
     "t2_kid": 120,
@@ -1801,7 +1801,7 @@ def render_aggrid(results, df_log, kid_id):
                         onCellClicked=js["copy_cus"], 
                         cellStyle={'cursor': 'pointer', 'color': '#007bff', 'textDecoration': 'underline'})
 
-    gb.configure_column('note_rieng', header_name="📝 Ghi chú", width=UI_WIDTH.get("t1_note", 250), minWidth=180, resizable=True, 
+    gb.configure_column('note_rieng', header_name="📝 Ghi chú", width=UI_WIDTH.get("t1_note", 650), minWidth=350, resizable=True, 
                         cellStyle={'color': '#f59e0b', 'fontWeight': '500'})
 
     gb.configure_column('_folder_trigger', hide=True)
