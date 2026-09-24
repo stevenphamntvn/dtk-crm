@@ -76,8 +76,11 @@ def remove_vietnamese_accent(s):
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 # Xử lý credentials từ Streamlit Cloud Secrets hoặc local file
-try:
-    if hasattr(st, 'secrets') and "GOOGLE_CREDENTIALS" in st.secrets:
+CREDS_JSON = os.path.join(BASE_DIR, "credentials.json")  # Default fallback
+
+# Chỉ xử lý secrets khi chạy trên Streamlit Cloud
+if hasattr(st, 'secrets') and "GOOGLE_CREDENTIALS" in st.secrets:
+    try:
         # Tạo temporary file từ secrets cho Streamlit Cloud
         creds_dict = json.loads(st.secrets["GOOGLE_CREDENTIALS"])
         with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False, encoding='utf-8') as f:
@@ -92,35 +95,9 @@ try:
             except:
                 pass
         atexit.register(cleanup_creds)
-    else:
-        # Fallback cho local development - ưu tiên file credentials.json
-        local_creds = os.path.join(BASE_DIR, "credentials.json")
-        if os.path.exists(local_creds):
-            CREDS_JSON = local_creds
-        else:
-            # Thử secrets.toml cho local development
-            secrets_toml = os.path.join(os.path.dirname(BASE_DIR), ".streamlit", "secrets.toml")
-            if os.path.exists(secrets_toml):
-                try:
-                    import toml
-                    secrets_data = toml.load(secrets_toml)
-                    if "GOOGLE_CREDENTIALS" in secrets_data:
-                        creds_dict = json.loads(secrets_data["GOOGLE_CREDENTIALS"])
-                        with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False, encoding='utf-8') as f:
-                            json.dump(creds_dict, f, ensure_ascii=False)
-                            CREDS_JSON = f.name
-                        atexit.register(cleanup_creds)
-                    else:
-                        CREDS_JSON = local_creds
-                except ImportError:
-                    CREDS_JSON = local_creds
-                except Exception:
-                    CREDS_JSON = local_creds
-            else:
-                CREDS_JSON = local_creds
-except Exception as e:
-    # Silent fallback - không hiển thị lỗi ở startup
-    CREDS_JSON = os.path.join(BASE_DIR, "credentials.json")
+    except (json.JSONDecodeError, KeyError):
+        # Giữ fallback nếu secrets không đúng format
+        pass
 SHEET_ID = "1a0roK3rSRQYlFMYIyC_5iMLNr0t7wUz5IRi0OdckPKA"
 GSK_SHEET_NAME = "BT-PN.PK-6.0-10000"
 # --- Cấu hình bổ sung ---
