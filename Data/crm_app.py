@@ -2158,6 +2158,43 @@ def crm_main_interface():
     if st.session_state.get('pwa_is_online', True):
         cache_data_for_pwa(df_houses, df_kids, df_log)
     
+    # Initial data load check
+    if df_houses.empty and df_kids.empty and df_log.empty:
+        st.warning("🚀 Chưa có dữ liệu nào. Hãy tải dữ liệu từ Google Sheets để bắt đầu.")
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            if st.button("🔄 Tải Khối Nhà", use_container_width=True):
+                with st.spinner("Đang tải Khối Nhà..."):
+                    try:
+                        pull_khoi_nha()
+                        st.cache_data.clear()
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Lỗi tải Khối Nhà: {e}")
+        
+        with col2:
+            if st.button("📥 Tải Khối Khách", use_container_width=True):
+                with st.spinner("Đang tải Khối Khách..."):
+                    try:
+                        trigger_sync_khoi_khach(direction="pull")
+                        st.cache_data.clear()
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Lỗi tải Khối Khách: {e}")
+        
+        with col3:
+            if st.button("📝 Tải Nhật Ký", use_container_width=True):
+                with st.spinner("Đang tải Nhật Ký..."):
+                    try:
+                        trigger_sync_khoi_khach(direction="pull")
+                        st.cache_data.clear()
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Lỗi tải Nhật Ký: {e}")
+        
+        st.info("💡 Hoặc sử dụng các nút đồng bộ trong sidebar bên trái")
+    
     if 'app_mode' not in st.session_state:
         st.session_state['app_mode'] = 'GUI_KHACH'
     is_tim_mode = st.session_state['app_mode'] == 'TIM_KHACH'
@@ -2169,6 +2206,14 @@ def crm_main_interface():
         
         if df_houses.empty or df_kids.empty:
             st.warning("Thiếu dữ liệu nguồn.")
+            if st.button("🔄 Tải dữ liệu từ Google Sheets", use_container_width=True):
+                with st.spinner("Đang tải dữ liệu..."):
+                    try:
+                        pull_khoi_nha()
+                        st.cache_data.clear()
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Lỗi tải dữ liệu: {e}")
         else:
             col_left, col_right = st.columns([1, 3])
             
@@ -2504,14 +2549,37 @@ def crm_main_interface():
     with tab2:
         st.header("👥 Danh Sách MyKID (Radar Chăm Sóc)")
         st.info("💡 Bảng tự động tính ngày tương tác cuối dựa trên Nhật ký gửi nhà. Ưu tiên tập trung Khách A (🔴) và B (🟠).")
-        render_tab2_mykid(df_kids, df_log)
+        
+        if df_kids.empty:
+            st.warning("Chưa có dữ liệu khách hàng từ MyKID.")
+            if st.button("📥 Tải Khối Khách từ Google Sheets", use_container_width=True):
+                with st.spinner("Đang tải Khối Khách..."):
+                    try:
+                        trigger_sync_khoi_khach(direction="pull")
+                        st.cache_data.clear()
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Lỗi tải Khối Khách: {e}")
+        else:
+            render_tab2_mykid(df_kids, df_log)
 
     with tab3:
         st.header("📝 Bảng điều khiển Zalo (Zalo Dashboard)")
         st.info("💡 Click đúp vào ô 'Phản hồi' hoặc 'Ngày gửi nhà' để sửa. Bấm 1-click vào cột Trạng thái để đổi màu.")
         
-        df_display_t3 = prepare_tab3_data(df_log, df_houses)
-        render_tab3_ui(df_display_t3)
+        if df_log.empty:
+            st.warning("Chưa có dữ liệu nhật ký.")
+            if st.button("📥 Tải Nhật Ký từ Google Sheets", use_container_width=True):
+                with st.spinner("Đang tải Nhật Ký..."):
+                    try:
+                        trigger_sync_khoi_khach(direction="pull")
+                        st.cache_data.clear()
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Lỗi tải Nhật Ký: {e}")
+        else:
+            df_display_t3 = prepare_tab3_data(df_log, df_houses)
+            render_tab3_ui(df_display_t3)
 
 # ==========================================
 # PWA OFFLINE SYNC HANDLERS
