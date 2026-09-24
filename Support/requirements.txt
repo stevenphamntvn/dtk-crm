@@ -1,5 +1,5 @@
-streamlit==1.46.1
+streamlit
 pandas
 gspread
 oauth2client
-streamlit-aggrid==1.1.8.post1
+streamlit-aggrid

@@ -13,7 +13,6 @@ serverPort = 8052
 
 [client]
 showErrorDetails = true
-maxUploadSize = 200
 
 [theme]
 primaryColor = "#FF4B4B"
