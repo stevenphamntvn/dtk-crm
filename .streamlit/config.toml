@@ -1,22 +1,11 @@
 [server]
-port = 8052
-address = "localhost"
-headless = false
+port = 8501
+headless = true
 enableCORS = false
 enableXsrfProtection = true
-enableWebsocketCompression = false
 
 [browser]
 gatherUsageStats = false
-serverAddress = "localhost"
-serverPort = 8052
-
-[client]
-showErrorDetails = true
 
 [theme]
 primaryColor = "#FF4B4B"
-backgroundColor = "#FFFFFF"
-secondaryBackgroundColor = "#F0F2F6"
-textColor = "#262730"
-font = "sans serif"
