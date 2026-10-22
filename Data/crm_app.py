@@ -4,6 +4,7 @@ import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 from datetime import datetime
 import os
+from pathlib import Path
 import csv
 import json
 import re
@@ -11,6 +12,7 @@ import subprocess
 import tempfile
 import platform
 import hashlib
+from customer_data import append_customer, next_customer_id, read_customers
 
 from st_aggrid import AgGrid, GridOptionsBuilder, JsCode
 from st_aggrid.shared import GridUpdateMode, DataReturnMode
@@ -21,7 +23,8 @@ import unicodedata
 # 0. CẤU HÌNH TRANG STREAMLIT & GIAO DIỆN CHUẨN (BẮT BUỘC ĐẦU TIÊN)
 # ==========================================
 st.set_page_config(
-    page_title="Đại Thế Kỷ Advisor CRM", 
+    page_title="CRM",
+    page_icon=str(Path(__file__).resolve().parents[1] / "assets" / "icons" / "crm.png"),
     layout="wide", 
     initial_sidebar_state="collapsed"
 )
@@ -440,7 +443,7 @@ def pull_khoi_nha():
             st.error(f"Lỗi tải Khối Nhà: {e}")
             return pd.DataFrame()
 
-def pull_khoi_khach_va_log():
+def pull_khoi_khach_va_log(pull_kids=True, pull_logs=True):
     """Tải Khối Khách (MyKID) và Nhật Ký (KID_log) từ Google Sheets về Cache"""
     gc = get_gspread_client()
     with st.spinner("⬇️ Đang tải Khối Khách & Nhật Ký từ Google Sheets..."):
@@ -448,16 +451,14 @@ def pull_khoi_khach_va_log():
             sh = gc.open_by_key(SHEET_ID)
             
             # 1. Tải MyKID
-            ws_kids = sh.worksheet("MyKID")
-            data_k = ws_kids.get_all_values()
+            data_k = sh.worksheet("MyKID").get_all_values() if pull_kids else []
             df_k = pd.DataFrame(data_k[1:], columns=data_k[0]) if data_k else pd.DataFrame()
             if not df_k.empty:
                 df_k.columns = df_k.columns.astype(str).str.strip()
                 df_k.astype(str).to_csv(FILE_KID, index=False, encoding='utf-8-sig')
                 
             # 2. Tải KID_log
-            ws_logs = sh.worksheet("KID_log")
-            data_l = ws_logs.get_all_values()
+            data_l = sh.worksheet("KID_log").get_all_values() if pull_logs else []
             df_l = pd.DataFrame(data_l[1:], columns=data_l[0]) if data_l else pd.DataFrame()
             if not df_l.empty:
                 df_l.columns = df_l.columns.astype(str).str.strip()
@@ -932,22 +933,22 @@ def parse_blk(blk_string):
     parts = blk_str.split('.')
     if parts: data["ten"] = parts[0]
     
-    match_gia = re.search(r'G(\d+)-(\d+)T', blk_str)
+    match_gia = re.search(r'G(\d+(?:\.\d+)?)-(\d+(?:\.\d+)?)T', blk_str)
     if match_gia:
-        data["min_gia"], data["max_gia"] = int(match_gia.group(1)), int(match_gia.group(2))
+        data["min_gia"], data["max_gia"] = float(match_gia.group(1)), float(match_gia.group(2))
     
     q_parts = re.findall(r'(Q[A-Z0-9]+)(?:\(([\d,]+)\))?', blk_str)
     for q_code, p_list in q_parts:
         data["quan_phuong"][q_code] = p_list.split(',') if p_list else []
         
-    match_ngang = re.search(r'N(\d+)M', blk_str)
-    if match_ngang: data["min_ngang"] = int(match_ngang.group(1))
+    match_ngang = re.search(r'N(\d+(?:\.\d+)?)M', blk_str)
+    if match_ngang: data["min_ngang"] = float(match_ngang.group(1))
 
     match_pn = re.search(r'PN(\d+)', blk_str)
     if match_pn: data["min_pn"] = int(match_pn.group(1))
         
-    match_dt = re.search(r'DT(\d+)', blk_str)
-    if match_dt: data["min_dt"] = int(match_dt.group(1))
+    match_dt = re.search(r'DT(\d+(?:\.\d+)?)', blk_str)
+    if match_dt: data["min_dt"] = float(match_dt.group(1))
     
     # [NÂNG CẤP]: Bắt số tầng tối thiểu từ chuỗi TGx
     match_tang = re.search(r'TG(\d+)', blk_str)
@@ -961,19 +962,161 @@ def parse_blk(blk_string):
 def build_blk(ten_khach, min_gia, max_gia, dict_qp_codes, min_ngang, min_pn, min_tang, min_dt, tags):
     """Đóng gói chuỗi Protocol chuẩn (Có thêm Tầng)"""
     parts = [str(ten_khach)]
-    parts.append(f"G{int(min_gia)}-{int(max_gia)}T")
+    parts.append(f"G{float(min_gia):g}-{float(max_gia):g}T")
     
     q_list = []
     for q_code, ps in dict_qp_codes.items():
         q_list.append(f"{q_code}({','.join(ps)})" if ps else f"{q_code}")
     if q_list: parts.append("+".join(q_list))
     
-    if min_ngang > 0: parts.append(f"N{int(min_ngang)}M")
+    if min_ngang > 0: parts.append(f"N{float(min_ngang):g}M")
     if min_pn > 0: parts.append(f"PN{int(min_pn)}") 
     if min_tang > 0: parts.append(f"TG{int(min_tang)}") # [NÂNG CẤP] Nạp TGx
-    if min_dt > 0: parts.append(f"DT{int(min_dt)}") 
+    if min_dt > 0: parts.append(f"DT{float(min_dt):g}")
     if tags: parts.append(".".join(tags))
     return ".".join(parts)
+
+def current_customer_needs(df_houses):
+    """Snapshot the active filter widgets, including unsaved filter changes."""
+    suffix = 'tim' if st.session_state.get('app_mode') == 'TIM_KHACH' else str(st.session_state.get('active_kid', ''))
+    state = st.session_state
+    districts = list(state.get(f'q_{suffix}', state.get('f_quan', [])))
+    wards = [str(p) for p in state.get(f'p_{suffix}', state.get('f_phuong', []))]
+    district_wards = {}
+    for district in districts:
+        code = MAP_QUAN.get(district, f"Q{district.replace('Quận ', '').replace(' ', '').upper()}")
+        selected_wards = wards
+        if wards and not df_houses.empty:
+            district_rows = df_houses[df_houses[CONFIG_GSK_CM['QUAN']].astype(str).str.strip().str.title() == district]
+            valid_wards = set(district_rows[CONFIG_GSK_CM['PHUONG']].astype(str).str.replace(r'\.0$', '', regex=True))
+            selected_wards = [p for p in wards if p in valid_wards]
+        district_wards[code] = selected_wards
+    tags = [tag for tag in ['MAT', 'HXT', 'HXH', 'HBG', 'TMA', 'NTC', 'KLP', 'TTT', 'DTT', '2MT', 'CGO']
+            if state.get(f'{tag.lower()}_{suffix}', tag in state.get('f_tags', []))]
+    return {
+        'min_gia': float(state.get(f'mg_{suffix}', state.get('f_min_gia', 0.0))),
+        'max_gia': float(state.get(f'xg_{suffix}', state.get('f_max_gia', 100.0))),
+        'dict_qp_codes': district_wards,
+        'min_ngang': float(state.get(f'mn_{suffix}', state.get('f_ngang', 0.0))),
+        'min_pn': int(state.get(f'mpn_{suffix}', state.get('f_min_pn', 0))),
+        'min_tang': int(state.get(f'mtg_{suffix}', state.get('f_min_tang', 0))),
+        'min_dt': float(state.get(f'mdt_{suffix}', state.get('f_min_dt', 0.0))),
+        'tags': tags,
+    }
+
+
+def show_customer_needs(needs):
+    areas = []
+    for code, wards in needs['dict_qp_codes'].items():
+        label = REV_MAP_QUAN.get(code, code)
+        areas.append(f"{label} (phường {', '.join(wards)})" if wards else label)
+    st.write(f"**Phân khúc:** {needs['min_gia']:g} – {needs['max_gia']:g} tỷ")
+    st.write('**Khu vực:** ' + ('; '.join(areas) or 'Tất cả khu vực'))
+    st.write(f"**Nhu cầu tối thiểu:** ngang {needs['min_ngang']:g} m; {needs['min_pn']} phòng ngủ; "
+             f"{needs['min_tang']} tầng; diện tích {needs['min_dt']:g} m²")
+    tag_labels = {'MAT': 'Mặt tiền', 'HXT': 'Hẻm xe tải', 'HXH': 'Hẻm xe hơi', 'HBG': 'Hẻm ba gác',
+                  'TMA': 'Thang máy', 'NTC': 'Nội thất cao cấp', 'KLP': 'Không lỗi phong thủy',
+                  'TTT': 'Tây Tứ Trạch', 'DTT': 'Đông Tứ Trạch', '2MT': 'Hai mặt tiền', 'CGO': 'Căn góc'}
+    st.write('**Đặc điểm:** ' + (', '.join(tag_labels.get(tag, tag) for tag in needs['tags']) or 'Không giới hạn'))
+
+
+@st.dialog('Thêm khách hàng', width='large')
+def dialog_add_customer(needs, classifications):
+    def prepare_review():
+        name = st.session_state['new_customer_name'].strip()
+        classification = st.session_state['new_customer_classification']
+        notes = st.session_state['new_customer_notes'].strip()
+        st.session_state['new_customer_fields'] = {'name': name, 'classification': classification, 'notes': notes}
+        st.session_state.pop('new_customer_error', None)
+        if not name:
+            st.session_state['new_customer_error'] = 'Vui lòng nhập tên khách hàng.'
+            return
+        if needs['min_gia'] < 0 or needs['max_gia'] < needs['min_gia']:
+            st.session_state['new_customer_error'] = 'Khoảng giá không hợp lệ. Hãy chỉnh lại bộ lọc nhu cầu.'
+            return
+        try:
+            kid = next_customer_id(read_customers(FILE_KID))
+        except Exception as exc:
+            st.session_state['new_customer_error'] = f'Không đọc được danh sách khách local: {exc}'
+            return
+        st.session_state['new_customer_review'] = {
+            'KID': kid, 'PLK': classification, 'thongtin_KID': name,
+            'ghi_chu': notes, 'bo_loc_KID': build_blk(name, **needs), 'ngay_tuong_tac': '',
+        }
+
+    draft = st.session_state.get('new_customer_review')
+    if draft is None:
+        st.caption('Phân khúc và khu vực được lấy từ bộ lọc hiện tại. Đóng cửa sổ để chỉnh lại bộ lọc nếu cần.')
+        show_customer_needs(needs)
+        fields = st.session_state.get('new_customer_fields', {})
+        with st.form('new_customer_form'):
+            st.text_input('Tên khách hàng', value=fields.get('name', ''), max_chars=200, key='new_customer_name')
+            st.selectbox('Phân loại', classifications, key='new_customer_classification',
+                         index=classifications.index(fields.get('classification', 'A')))
+            st.text_area('Ghi chú', value=fields.get('notes', ''), key='new_customer_notes')
+            st.form_submit_button('Xem báo cáo trước khi lưu', type='primary', on_click=prepare_review)
+        if st.session_state.get('new_customer_error'):
+            st.error(st.session_state['new_customer_error'])
+        return
+
+    st.subheader('Kiểm tra thông tin khách hàng')
+    st.write('**Mã khách:**', draft['KID'])
+    st.write('**Tên khách:**', draft['thongtin_KID'])
+    st.write('**Phân loại:**', draft['PLK'])
+    st.write('**Ghi chú:**', draft['ghi_chu'] or 'Chưa có')
+    show_customer_needs(needs)
+    st.write('**Chuỗi nhu cầu sẽ lưu:**')
+    st.code(draft['bo_loc_KID'], language=None)
+    st.info('Xác nhận sẽ lưu vào danh sách local. Nhấn 📤 UP KK LÊN khi muốn đưa dữ liệu lên Google Sheets.')
+    edit_col, save_col = st.columns(2)
+    edit_col.button('Quay lại chỉnh sửa', on_click=lambda: st.session_state.pop('new_customer_review', None))
+    if save_col.button('Xác nhận lưu khách hàng', type='primary'):
+        try:
+            append_customer(FILE_KID, draft)
+        except Exception as exc:
+            st.error(f'Chưa lưu khách hàng: {exc}')
+            return
+        st.session_state['customer_created_message'] = f"Đã lưu khách {draft['KID']} — {draft['thongtin_KID']} vào local. Nhấn 📤 UP KK LÊN để đồng bộ lên Google Sheets."
+        st.session_state.pop('new_customer_review', None)
+        st.session_state.pop('new_customer_fields', None)
+        st.session_state['customer_to_select'] = draft['KID']
+        st.session_state['refresh_counter'] = st.session_state.get('refresh_counter', 0) + 1
+        st.rerun(scope='app')
+
+
+def apply_created_customer_selection(df_kids):
+    """Select the saved customer before rendering the parent fragment's widgets."""
+    kid = st.session_state.get('customer_to_select')
+    if not kid or 'KID' not in df_kids.columns:
+        return
+    rows = df_kids[df_kids['KID'].astype(str).str.strip() == str(kid)]
+    if rows.empty:
+        return
+    row = rows.iloc[0]
+    classification = str(row.get('PLK', '')).strip().upper()
+    selected_filter = 'Khách D (Đã bỏ)' if classification == 'D' else f'Khách {classification}'
+    for key in list(st.session_state):
+        if key.startswith('kid_selectbox_'):
+            del st.session_state[key]
+    st.session_state['cloud_plk_filter'] = selected_filter
+    st.session_state['local_plk_filter'] = selected_filter
+    st.session_state[f'kid_selectbox_{selected_filter}'] = f"{kid}({classification}). {str(row.get('thongtin_KID', '')).strip()}"
+    st.session_state['app_mode'] = 'GUI_KHACH'
+    st.session_state.pop('active_kid', None)
+    st.session_state.pop('active_blk', None)
+    st.session_state.pop('customer_to_select', None)
+
+
+def render_add_customer_button(df_houses, df_kids, key):
+    if st.button('➕ Thêm khách hàng', key=key):
+        for field in ['new_customer_review', 'new_customer_fields', 'new_customer_error',
+                      'new_customer_name', 'new_customer_classification', 'new_customer_notes']:
+            st.session_state.pop(field, None)
+        classifications = ['A', 'B', 'C', 'D']
+        existing = df_kids.get('PLK', pd.Series(dtype=str)).fillna('').astype(str).str.strip().str.upper()
+        classifications += sorted(set(existing) - set(classifications) - {''})
+        dialog_add_customer(current_customer_needs(df_houses), classifications)
+
 
 def update_filters_from_kid():
     selected_str = st.session_state.selected_kid_ui
@@ -1042,7 +1185,7 @@ def load_local_data():
                 df_h = safe_read(FILE_GSK)
                 
         if df_k.empty or df_l.empty:
-            df_k_pulled, df_l_pulled = pull_khoi_khach_va_log()
+            df_k_pulled, df_l_pulled = pull_khoi_khach_va_log(pull_kids=df_k.empty, pull_logs=df_l.empty)
             if df_k.empty and df_k_pulled is not None and not df_k_pulled.empty:
                 df_k = df_k_pulled
             else:
@@ -1463,12 +1606,18 @@ def get_aggrid_js_codes(c_link_hidden, c_link_ggd_hidden):
             
             // Set timeout to handle single click (delayed to wait for potential double-click)
             params.node._clickTimeout = setTimeout(function() {
+                params.node._clickTimeout = null;
                 if (params.event && params.event.detail === 1) { 
-                    const value = params.value; 
                     const field = params.colDef.field;
+                    const value = params.node.data[field];
                     if (value === '✅ Đã gửi' || value === '🟡 Chờ gửi' || value === '🔴 Black List') return; 
-                    if (value === '🔘 Đã chọn') return; // Không toggle khi đang ở 🔘 (để dành cho double-click)
-                    let newValue = (value === '❌ Chưa gửi') ? '🔘 Đã chọn' : '❌ Chưa gửi';
+                    let newValue;
+                    if (value === '🔘 Đã chọn') {
+                        newValue = params.node._originalState || '❌ Chưa gửi';
+                    } else {
+                        params.node._originalState = value;
+                        newValue = '🔘 Đã chọn';
+                    }
                     params.node.setDataValue(field, newValue);
                 }
             }, 200); // Wait 200ms to check for double-click
@@ -2408,7 +2557,7 @@ check_authentication()
 # 4. GIAO DIỆN CHÍNH (MAIN UI APP)
 # ==========================================
 
-st.title("🚀 ĐẠI THẾ KỶ ADVISOR - CRM V1.0")
+st.title("CRM")
 st.markdown("---")
 
 with st.sidebar:
@@ -2466,6 +2615,9 @@ with st.sidebar:
 @st.fragment
 def crm_main_interface():
     df_houses, df_kids, df_log = load_local_data()
+    apply_created_customer_selection(df_kids)
+    if 'customer_created_message' in st.session_state:
+        st.success(st.session_state.pop('customer_created_message'))
     
     # Cache data for PWA when online (disabled for cloud debugging)
     if not IS_CLOUD and st.session_state.get('pwa_is_online', True):
@@ -2887,6 +3039,8 @@ def crm_main_interface():
                     t6.checkbox("TTT", value="TTT" in st.session_state.f_tags, key=f"ttt_{suffix}")
                     t7.checkbox("DTT", value="DTT" in st.session_state.f_tags, key=f"dtt_{suffix}")
 
+                render_add_customer_button(df_houses, df_kids, 'add_customer_cloud')
+
             else:
                 # -----------------------------------------------------
                 # GIAO DIỆN LOCAL: GIỮ NGUYÊN BỐ CỤC 2 CỘT (COL_LEFT / COL_RIGHT)
@@ -2897,7 +3051,7 @@ def crm_main_interface():
                     st.subheader("1. Chọn khách" if not is_tim_mode else "1. Rổ hàng (Đã Mở Khóa)")
                     
                     filter_col, select_col = st.columns([1, 2.5])
-                    selected_filter = filter_col.selectbox("Lọc mức độ:", filter_options, disabled=is_tim_mode)
+                    selected_filter = filter_col.selectbox("Lọc mức độ:", filter_options, disabled=is_tim_mode, key="local_plk_filter")
                     
                     if selected_filter == "Tất cả (A,B,C)":
                         df_kids_active = df_kids[df_kids['PLK'].astype(str).str.strip().str.upper() != 'D'].copy()
@@ -3018,6 +3172,8 @@ def crm_main_interface():
                     f_cgo = t1.checkbox("Căn góc", value="CGO" in st.session_state.f_tags, key=f"cgo_{suffix}")
                     f_ttt = t2.checkbox("Tây Tứ Trạch", value="TTT" in st.session_state.f_tags, key=f"ttt_{suffix}")
                     f_dtt = t1.checkbox("Đông Tứ Trạch", value="DTT" in st.session_state.f_tags, key=f"dtt_{suffix}")
+
+                    render_add_customer_button(df_houses, df_kids, 'add_customer_local')
 
                 with col_right:
                     st.subheader("3. Kết quả tìm kiếm")
@@ -3187,6 +3343,7 @@ def crm_main_interface():
 
     with tab2:
         st.header("👥 Danh Sách MyKID (Radar Chăm Sóc)")
+        render_add_customer_button(df_houses, df_kids, 'add_customer_mykid')
         st.info("💡 Bảng tự động tính ngày tương tác cuối dựa trên Nhật ký gửi nhà. Ưu tiên tập trung Khách A (🔴) và B (🟠).")
         
         if df_kids.empty:
