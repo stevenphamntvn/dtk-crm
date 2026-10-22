@@ -84,6 +84,55 @@ class SyncReportTests(unittest.TestCase):
         self.assertTrue(report['rows'].empty)
         pd.testing.assert_frame_equal(local, original)
 
+    def test_one_note_change_is_the_only_row_despite_all_customer_dates_changing(self):
+        online = pd.DataFrame([
+            {'KID': f'KID_{i:03d}', 'thongtin_KID': f'Khách {i}', 'ghi_chu': 'Ghi chú cũ',
+             'PLK': 'A', 'ngay_tuong_tac': '2026-10-20', 'updated_at': '2026-10-20 10:00:00'}
+            for i in range(1, 42)
+        ])
+        local = online.copy(deep=True)
+        local['ngay_tuong_tac'] = '2026-10-22'
+        local['updated_at'] = '2026-10-22 09:00:00'
+        local['ngay_tuong_tac_new'] = '2026-10-22'
+        local.loc[20, 'ghi_chu'] = 'Gọi sau 17h'
+        for direction in ['push', 'pull']:
+            with self.subTest(direction=direction):
+                report = build_sync_report(local, online, ['KID'], direction)
+                self.assertEqual((report['added'], report['removed'], report['updated']), (0, 0, 1))
+                self.assertEqual(len(report['rows']), 1)
+                row = report['rows'].iloc[0]
+                self.assertEqual((row['KID'], row['Thông tin']), ('KID_021', 'Ghi chú'))
+                self.assertIn('Gọi sau 17h', row['Local'])
+                self.assertIn('Ghi chú cũ', row['Online'])
+
+    def test_only_automatic_timestamp_changes_produce_no_report_rows_or_updates(self):
+        local = pd.DataFrame([{'KID': 'K1', 'UID': '0012', 'trang_thai': 'đã gửi',
+                               'timestamp': '2026-10-22 17:00:00', 'modified_at': '2026-10-22'}])
+        online = local.copy(deep=True)
+        online['timestamp'] = '2026-10-20 09:00:00'
+        online['modified_at'] = '2026-10-20'
+        for direction in ['push', 'pull']:
+            report = build_sync_report(local, online, ['KID', 'UID'], direction)
+            self.assertEqual(report['updated'], 0)
+            self.assertTrue(report['rows'].empty)
+
+    def test_scheduled_send_date_changes_remain_visible(self):
+        local = pd.DataFrame([{'KID': 'K1', 'UID': '0012', 'ngay_gui': '2026-10-23',
+                               'timestamp': '2026-10-22 17:00:00'}])
+        online = pd.DataFrame([{'KID': 'K1', 'UID': '0012', 'ngay_gui': '2026-10-24',
+                                'timestamp': '2026-10-20 09:00:00'}])
+        report = build_sync_report(local, online, ['KID', 'UID'], 'push')
+        self.assertEqual(report['updated'], 1)
+        self.assertEqual(report['rows']['Thông tin'].tolist(), ['Ngày hẹn / gửi nhà'])
+
+    def test_added_and_removed_customers_still_appear_without_date_fields(self):
+        local = pd.DataFrame([{'KID': 'K1', 'thongtin_KID': 'Khách A', 'ngay_tuong_tac_new': '2026-10-22'}])
+        online = pd.DataFrame([{'KID': 'K2', 'thongtin_KID': 'Khách B', 'ngay_tuong_tac': '2026-10-20'}])
+        report = build_sync_report(local, online, ['KID'], 'push')
+        self.assertEqual((report['added'], report['removed'], report['updated']), (1, 1, 0))
+        self.assertEqual(set(report['rows']['KID']), {'K1', 'K2'})
+        self.assertEqual(set(report['rows']['Thông tin']), {'Mã khách', 'Tên / thông tin khách'})
+
     def test_ambiguous_keys_are_reported_as_errors(self):
         for rows in [[{'KID': ''}], [{'KID': 'K1'}, {'KID': 'K1'}], [{'name': 'Minh'}]]:
             with self.subTest(rows=rows):

@@ -13,6 +13,12 @@ FIELD_LABELS = {
 REPORT_COLUMNS = ['Thao tác', 'Khách hàng', 'KID', 'UID', 'Thông tin', 'Local', 'Online']
 ADD_STYLE = 'color: #15803d; background-color: #dcfce7; font-weight: bold'
 REMOVE_STYLE = 'color: #b91c1c; background-color: #fee2e2; font-weight: bold'
+# These values are recalculated or stamped during normal editing/sync. They
+# still sync normally; they just don't make a customer/log appear in review.
+AUTO_UPDATE_FIELDS = frozenset({
+    'ngay_tuong_tac', 'ngay_tuong_tac_new', 'timestamp',
+    'update', 'updated_at', 'modified_at',
+})
 
 
 def build_sync_report(df_local, df_cloud, primary_keys, direction, customer_names=None):
@@ -46,7 +52,8 @@ def build_sync_report(df_local, df_cloud, primary_keys, direction, customer_name
 
     local, cloud = by_key(frames['Local']), by_key(frames['Online'])
     source, target = (local, cloud) if direction == 'push' else (cloud, local)
-    fields = list(dict.fromkeys([*frames[target_side].columns, *frames[source_side].columns]))
+    fields = [field for field in dict.fromkeys([*frames[target_side].columns, *frames[source_side].columns])
+              if field.lower() not in AUTO_UPDATE_FIELDS]
     rows = []
     for key in sorted(set(source) | set(target)):
         new, old = source.get(key), target.get(key)

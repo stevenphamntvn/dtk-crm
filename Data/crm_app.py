@@ -554,13 +554,14 @@ def render_sync_report(report):
     if report['skipped_empty_pull']:
         st.info('Online đang trống. Theo cơ chế tải về hiện tại, bảng Local này được giữ nguyên.')
         return
-    st.write(f"Thay đổi dự kiến trên **{report['target']}**: "
+    st.write(f"Thay đổi nội dung dự kiến trên **{report['target']}**: "
              f"thêm **{report['added']}**, bỏ **{report['removed']}**, sửa **{report['updated']}** bản ghi.")
     if report['rows'].empty:
-        st.caption('Không có thay đổi.')
+        st.caption('Không có thay đổi nội dung cần xem. Bỏ qua các mốc thời gian tự cập nhật.')
         return
     st.caption('Mỗi dòng là một trường dữ liệu. Dấu + màu xanh: thêm; dấu − màu đỏ: bỏ. '
-               'Sửa gồm bỏ giá trị cũ và thêm giá trị mới. Hai cột thể hiện dữ liệu hiện có ở mỗi bên.')
+               'Sửa gồm bỏ giá trị cũ và thêm giá trị mới. Chỉ hiện trường có thay đổi nội dung; '
+               'ẩn ngày tương tác và mốc thời gian tự cập nhật, vẫn hiện thay đổi ngày hẹn / gửi nhà.')
     st.dataframe(style_sync_report(report), hide_index=True,
                  column_config={'Local': st.column_config.TextColumn('Local', width='large'),
                                 'Online': st.column_config.TextColumn('Online', width='large')})
