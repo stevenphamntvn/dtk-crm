@@ -16,6 +16,7 @@ from streamlit.testing.v1 import AppTest
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'Data'))
 from customer_data import append_customer, next_customer_id, read_customers
+from sync_report import build_sync_report
 
 
 # The legacy entry point runs authentication/UI on import. Extract only the
@@ -90,7 +91,8 @@ class CustomerCreationTests(unittest.TestCase):
         sheet.worksheet.side_effect = {'MyKID': kid_sheet, 'KID_log': log_sheet}.__getitem__
         client = Mock()
         client.open_by_key.return_value = sheet
-        namespace = {'pd': pd, 'st': st, 'SHEET_ID': 'test-only', 'get_gspread_client': lambda: client}
+        namespace = {'pd': pd, 'st': st, 'SHEET_ID': 'test-only', 'get_gspread_client': lambda: client,
+                     'build_sync_report': build_sync_report, 'render_sync_report': Mock()}
         exec(definitions('compare_dataframes', 'dialog_kiem_duyet_khoi_khach'), namespace)
         namespace['dialog_kiem_duyet_khoi_khach'](pd.DataFrame(), local, pd.DataFrame(), pd.DataFrame(), 'push')
         kid_sheet.update.assert_called_once_with([local.columns.tolist()] + local.values.tolist())

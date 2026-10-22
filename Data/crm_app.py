@@ -13,6 +13,7 @@ import tempfile
 import platform
 import hashlib
 from customer_data import append_customer, next_customer_id, read_customers
+from sync_report import build_sync_report, style_sync_report
 
 from st_aggrid import AgGrid, GridOptionsBuilder, JsCode
 from st_aggrid.shared import GridUpdateMode, DataReturnMode
@@ -549,6 +550,22 @@ def compare_dataframes(df_local, df_cloud, primary_keys):
             
     return only_local, only_cloud, actual_updates
 
+def render_sync_report(report):
+    if report['skipped_empty_pull']:
+        st.info('Online đang trống. Theo cơ chế tải về hiện tại, bảng Local này được giữ nguyên.')
+        return
+    st.write(f"Thay đổi dự kiến trên **{report['target']}**: "
+             f"thêm **{report['added']}**, bỏ **{report['removed']}**, sửa **{report['updated']}** bản ghi.")
+    if report['rows'].empty:
+        st.caption('Không có thay đổi.')
+        return
+    st.caption('Mỗi dòng là một trường dữ liệu. Dấu + màu xanh: thêm; dấu − màu đỏ: bỏ. '
+               'Sửa gồm bỏ giá trị cũ và thêm giá trị mới. Hai cột thể hiện dữ liệu hiện có ở mỗi bên.')
+    st.dataframe(style_sync_report(report), hide_index=True,
+                 column_config={'Local': st.column_config.TextColumn('Local', width='large'),
+                                'Online': st.column_config.TextColumn('Online', width='large')})
+
+
 @st.dialog("⚠️ KIỂM DUYỆT ĐỒNG BỘ KHỐI KHÁCH (KK)", width="large")
 def dialog_kiem_duyet_khoi_khach(df_kid_cloud, df_kid_local, df_log_cloud, df_log_local, direction):
     """Giao diện Popup so sánh và báo cáo thay đổi dựa trên thuật toán Khóa Chính"""
@@ -556,48 +573,25 @@ def dialog_kiem_duyet_khoi_khach(df_kid_cloud, df_kid_local, df_log_cloud, df_lo
     
     st.info(f"💡 Chế độ: **{'📤 UP LÊN CLOUD (Nguồn Local sẽ đè lên Cloud)' if is_push else '📥 TẢI VỀ MÁY (Nguồn Cloud sẽ đè xuống Local)'}**")
     
-    # --- PHÂN TÍCH DIFF BẢNG MYKID ---
-    st.subheader("👥 Báo cáo Khách Hàng (MyKID)")
-    kid_only_local, kid_only_cloud, kid_both = compare_dataframes(df_kid_local, df_kid_cloud, ['KID'])
-    
-    if is_push:
-        st.write(f"- 🟢 **Thêm mới lên Cloud:** {kid_only_local} khách")
-        st.write(f"- 🔴 **Xóa khỏi Cloud:** {kid_only_cloud} khách (Do Local không tồn tại)")
-        st.write(f"- 🟡 **Cập nhật dữ liệu (BL/Ghi chú):** {kid_both} khách khớp mã KID")
-    else:
-        st.write(f"- 🟢 **Tải mới về Local:** {kid_only_cloud} khách")
-        st.write(f"- 🔴 **Xóa khỏi Local:** {kid_only_local} khách (🚨 Chú ý: Đây là những khách bạn chưa Up lên!)")
-        st.write(f"- 🟡 **Ghi đè Local:** {kid_both} khách khớp mã KID")
+    try:
+        customer_names = {}
+        for frame in [df_kid_local, df_kid_cloud]:
+            if 'KID' in frame.columns and 'thongtin_KID' in frame.columns:
+                customer_names.update(dict(zip(frame['KID'].fillna('').astype(str).str.strip(),
+                                               frame['thongtin_KID'].fillna('').astype(str))))
+        kid_report = build_sync_report(df_kid_local, df_kid_cloud, ['KID'], direction)
+        log_report = build_sync_report(df_log_local, df_log_cloud, ['KID', 'UID'], direction, customer_names)
+    except ValueError as exc:
+        st.error(f'Chưa thể lập báo cáo đồng bộ: {exc}')
+        return
 
+    st.subheader('👥 Báo cáo Khách Hàng (MyKID)')
+    render_sync_report(kid_report)
+    st.divider()
+    st.subheader('📝 Báo cáo Nhật Ký Zalo (KID_log)')
+    render_sync_report(log_report)
     st.divider()
 
-    # --- PHÂN TÍCH DIFF BẢNG KID_LOG ---
-    st.subheader("📝 Báo cáo Nhật Ký Zalo (KID_log)")
-    log_only_local, log_only_cloud, log_both = compare_dataframes(df_log_local, df_log_cloud, ['KID', 'UID'])
-
-    # --- ĐẾM SỐ LƯỢNG BLACK LIST ---
-    bl_count_local = 0
-    bl_count_cloud = 0
-    
-    if not df_log_local.empty:
-        bl_count_local = len(df_log_local[df_log_local.iloc[:, 4].astype(str).str.strip() == 'black_list'])
-    
-    if not df_log_cloud.empty:
-        bl_count_cloud = len(df_log_cloud[df_log_cloud.iloc[:, 4].astype(str).str.strip() == 'black_list'])
-
-    if is_push:
-        st.write(f"- 🟢 **Lịch hẹn gửi mới (Đẩy lên Cloud):** {log_only_local} dòng")
-        st.write(f"- 🔴 **Sẽ bị xóa trên Cloud:** {log_only_cloud} dòng")
-        st.write(f"- 🟡 **Cập nhật Trạng thái/Phản hồi:** {log_both} dòng")
-        st.write(f"- 🔴 **Black List (Local):** {bl_count_local} căn")
-    else:
-        st.write(f"- 🟢 **Lịch hẹn mới tải về máy:** {log_only_cloud} dòng")
-        st.write(f"- 🔴 **Sẽ bị xóa ở máy (Local):** {log_only_local} dòng (🚨 Cảnh báo mất lịch hẹn chưa đẩy!)")
-        st.write(f"- 🟡 **Ghi đè log tại máy:** {log_both} dòng")
-        st.write(f"- 🔴 **Black List (Cloud):** {bl_count_cloud} căn")
-
-    st.markdown("<br>", unsafe_allow_html=True)
-    
     # --- CƠ CHẾ CHỐT CHẶN BẢO VỆ DỮ LIỆU ---
     if is_push:
         if st.button("🚀 XÁC NHẬN OK - ĐẨY LÊN CLOUD", type="primary", use_container_width=True):
@@ -622,7 +616,7 @@ def dialog_kiem_duyet_khoi_khach(df_kid_cloud, df_kid_local, df_log_cloud, df_lo
                     st.error(f"Lỗi ghi đè Cloud: {e}")
     else:
         # Bật cảnh báo nút Đỏ nếu Tải về mà có nguy cơ mất dữ liệu Local
-        nguy_co_mat_data = (kid_only_local > 0 or log_only_local > 0)
+        nguy_co_mat_data = (kid_report['removed'] > 0 or log_report['removed'] > 0)
         
         if st.button("📥 XÁC NHẬN OK - TẢI VỀ MÁY", type="secondary" if nguy_co_mat_data else "primary", use_container_width=True):
             with st.spinner("Đang ghi đè dữ liệu xuống ổ cứng..."):
