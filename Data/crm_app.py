@@ -2837,40 +2837,46 @@ def crm_main_interface():
 
                         q_codes = list(prefs.get('quan_phuong', {}).keys())
                         st.session_state.f_quan = [REV_MAP_QUAN.get(q, q) for q in q_codes]
-                        # f_phuong không còn dùng, đã chuyển sang dict_qp_codes
+                        st.session_state.f_phuong = []
                         st.session_state.f_tags = prefs.get('tags', [])
 
                 suffix = "tim" if is_tim_mode else str(kid_id)
 
                 # Lấy giá trị bộ lọc hiện tại
-                min_gia = float(st.session_state.get(f"mg_{suffix}", st.session_state.f_min_gia))
-                max_gia = float(st.session_state.get(f"xg_{suffix}", st.session_state.f_max_gia))
+                min_gia = float(st.session_state.get(f"mg_{suffix}", st.session_state.get('f_min_gia', 0.0)))
+                max_gia = float(st.session_state.get(f"xg_{suffix}", st.session_state.get('f_max_gia', 100.0)))
                 
-                valid_default_q = [q for q in st.session_state.f_quan if q in districts]
+                valid_default_q = [q for q in st.session_state.get('f_quan', []) if q in districts]
                 sel_q = st.session_state.get(f"q_{suffix}", valid_default_q)
                 
-                list_p = active_houses[active_houses[CONFIG_GSK_CM["QUAN"]].str.title().isin(sel_q)][CONFIG_GSK_CM["PHUONG"]].astype(str).str.replace(r'\.0$', '', regex=True).unique().tolist() if sel_q else []
-                valid_default_p = [p for p in st.session_state.f_phuong if p in list_p]
-                sel_p = st.session_state.get(f"p_{suffix}", valid_default_p)
+                # Dynamic dict_qp_codes từ preferences hoặc session_state
+                prefs_cloud = parse_blk(st.session_state.get('active_blk', ''))
+                quan_phuong_prefs = prefs_cloud.get('quan_phuong', {})
+                dict_qp_codes = {}
+                for q in sel_q:
+                    q_code = MAP_QUAN.get(q, f"Q{q.replace('Quận ', '').replace(' ', '').upper()}")
+                    default_p = quan_phuong_prefs.get(q_code, [])
+                    dict_qp_codes[q_code] = st.session_state.get(f"p_{q}_{suffix}", default_p)
                 
-                min_n = float(st.session_state.get(f"mn_{suffix}", st.session_state.f_ngang))
-                min_pn = float(st.session_state.get(f"mpn_{suffix}", st.session_state.f_min_pn))
+                min_n = float(st.session_state.get(f"mn_{suffix}", st.session_state.get('f_ngang', 0.0)))
+                min_pn = float(st.session_state.get(f"mpn_{suffix}", st.session_state.get('f_min_pn', 0.0)))
                 min_tang = float(st.session_state.get(f"mtg_{suffix}", st.session_state.get('f_min_tang', 0.0)))
-                min_dt = float(st.session_state.get(f"mdt_{suffix}", st.session_state.f_min_dt))
+                min_dt = float(st.session_state.get(f"mdt_{suffix}", st.session_state.get('f_min_dt', 0.0)))
                 max_pm2 = float(st.session_state.get(f"xpm2_{suffix}", st.session_state.get('f_max_pm2', 0.0)))
 
-                f_mat = bool(st.session_state.get(f"mat_{suffix}", "MAT" in st.session_state.f_tags))
-                f_hxt = bool(st.session_state.get(f"hxt_{suffix}", "HXT" in st.session_state.f_tags))
-                f_hxh = bool(st.session_state.get(f"hxh_{suffix}", "HXH" in st.session_state.f_tags))
-                f_hbg = bool(st.session_state.get(f"hbg_{suffix}", "HBG" in st.session_state.f_tags))
+                f_tags = st.session_state.get('f_tags', [])
+                f_mat = bool(st.session_state.get(f"mat_{suffix}", "MAT" in f_tags))
+                f_hxt = bool(st.session_state.get(f"hxt_{suffix}", "HXT" in f_tags))
+                f_hxh = bool(st.session_state.get(f"hxh_{suffix}", "HXH" in f_tags))
+                f_hbg = bool(st.session_state.get(f"hbg_{suffix}", "HBG" in f_tags))
 
-                f_tma = bool(st.session_state.get(f"tma_{suffix}", "TMA" in st.session_state.f_tags))
-                f_ntc = bool(st.session_state.get(f"ntc_{suffix}", "NTC" in st.session_state.f_tags))
-                f_klp = bool(st.session_state.get(f"klp_{suffix}", "KLP" in st.session_state.f_tags))
-                f_2mt = bool(st.session_state.get(f"2mt_{suffix}", "2MT" in st.session_state.f_tags))
-                f_cgo = bool(st.session_state.get(f"cgo_{suffix}", "CGO" in st.session_state.f_tags))
-                f_ttt = bool(st.session_state.get(f"ttt_{suffix}", "TTT" in st.session_state.f_tags))
-                f_dtt = bool(st.session_state.get(f"dtt_{suffix}", "DTT" in st.session_state.f_tags))
+                f_tma = bool(st.session_state.get(f"tma_{suffix}", "TMA" in f_tags))
+                f_ntc = bool(st.session_state.get(f"ntc_{suffix}", "NTC" in f_tags))
+                f_klp = bool(st.session_state.get(f"klp_{suffix}", "KLP" in f_tags))
+                f_2mt = bool(st.session_state.get(f"2mt_{suffix}", "2MT" in f_tags))
+                f_cgo = bool(st.session_state.get(f"cgo_{suffix}", "CGO" in f_tags))
+                f_ttt = bool(st.session_state.get(f"ttt_{suffix}", "TTT" in f_tags))
+                f_dtt = bool(st.session_state.get(f"dtt_{suffix}", "DTT" in f_tags))
 
                 # --- 3. BẢNG KẾT QUẢ TÌM KIẾM (FULL-WIDTH TRÀN VIỀN) ---
                 st.subheader("3. Kết quả tìm kiếm (Kho Hàng Phù Hợp)")
@@ -3040,8 +3046,8 @@ def crm_main_interface():
                     st.info("🔓 Kho hàng đang mở khóa toàn bộ. Bạn có thể tự chỉnh lọc bằng tay bên dưới để khoanh vùng.")
 
                 cf1, cf2, cf3, cf4 = st.columns(4)
-                cf1.number_input("Giá từ (Tỷ)", value=st.session_state.f_min_gia, step=1.0, key=f"mg_{suffix}")
-                cf2.number_input("Đến (Tỷ)", value=st.session_state.f_max_gia, step=1.0, key=f"xg_{suffix}")
+                cf1.number_input("Giá từ (Tỷ)", value=st.session_state.get('f_min_gia', 0.0), step=1.0, key=f"mg_{suffix}")
+                cf2.number_input("Đến (Tỷ)", value=st.session_state.get('f_max_gia', 100.0), step=1.0, key=f"xg_{suffix}")
                 cf3.number_input("Giá m² tối đa", value=st.session_state.get('f_max_pm2', 0.0), step=0.5, key=f"xpm2_{suffix}")
                 cf4.multiselect("Chọn Quận", districts, default=valid_default_q, key=f"q_{suffix}")
 
@@ -3075,32 +3081,33 @@ def crm_main_interface():
                     dict_qp_codes = {}
 
                 cf5, cf6, cf7, cf8 = st.columns(4)
-                cf5.number_input("Ngang (m)", value=st.session_state.f_ngang, step=1.0, key=f"mn_{suffix}")
-                cf6.number_input("Số PN", value=int(st.session_state.f_min_pn), step=1, format="%d", key=f"mpn_{suffix}")
+                cf5.number_input("Ngang (m)", value=st.session_state.get('f_ngang', 0.0), step=1.0, key=f"mn_{suffix}")
+                cf6.number_input("Số PN", value=int(st.session_state.get('f_min_pn', 0.0)), step=1, format="%d", key=f"mpn_{suffix}")
                 cf7.number_input("Số Tầng", value=int(st.session_state.get('f_min_tang', 0.0)), step=1, format="%d", key=f"mtg_{suffix}")
 
                 cf9, cf10 = st.columns(2)
-                cf9.number_input("DT (m2)", value=float(st.session_state.f_min_dt), step=5.0, key=f"mdt_{suffix}") 
+                cf9.number_input("DT (m2)", value=float(st.session_state.get('f_min_dt', 0.0)), step=5.0, key=f"mdt_{suffix}") 
 
                 col_vitri, col_dacdiem = st.columns(2)
+                f_tags_w = st.session_state.get('f_tags', [])
                 with col_vitri:
                     st.write("**📍 Vị trí (HOẶC):**")
                     p1, p2, p3, p4 = st.columns(4)
-                    p1.checkbox("Mặt tiền", value="MAT" in st.session_state.f_tags, key=f"mat_{suffix}")
-                    p2.checkbox("Xe Tải", value="HXT" in st.session_state.f_tags, key=f"hxt_{suffix}")
-                    p3.checkbox("Xe Hơi", value="HXH" in st.session_state.f_tags, key=f"hxh_{suffix}")
-                    p4.checkbox("Ba Gác", value="HBG" in st.session_state.f_tags, key=f"hbg_{suffix}")
+                    p1.checkbox("Mặt tiền", value="MAT" in f_tags_w, key=f"mat_{suffix}")
+                    p2.checkbox("Xe Tải", value="HXT" in f_tags_w, key=f"hxt_{suffix}")
+                    p3.checkbox("Xe Hơi", value="HXH" in f_tags_w, key=f"hxh_{suffix}")
+                    p4.checkbox("Ba Gác", value="HBG" in f_tags_w, key=f"hbg_{suffix}")
 
                 with col_dacdiem:
                     st.write("**💎 Đặc điểm (VÀ):**")
                     t1, t2, t3, t4, t5, t6, t7 = st.columns(7)
-                    t1.checkbox("Thang máy", value="TMA" in st.session_state.f_tags, key=f"tma_{suffix}")
-                    t2.checkbox("Nội thất", value="NTC" in st.session_state.f_tags, key=f"ntc_{suffix}")
-                    t3.checkbox("Không lỗi", value="KLP" in st.session_state.f_tags, key=f"klp_{suffix}")
-                    t4.checkbox("2 MT", value="2MT" in st.session_state.f_tags, key=f"2mt_{suffix}")
-                    t5.checkbox("Căn góc", value="CGO" in st.session_state.f_tags, key=f"cgo_{suffix}")
-                    t6.checkbox("TTT", value="TTT" in st.session_state.f_tags, key=f"ttt_{suffix}")
-                    t7.checkbox("DTT", value="DTT" in st.session_state.f_tags, key=f"dtt_{suffix}")
+                    t1.checkbox("Thang máy", value="TMA" in f_tags_w, key=f"tma_{suffix}")
+                    t2.checkbox("Nội thất", value="NTC" in f_tags_w, key=f"ntc_{suffix}")
+                    t3.checkbox("Không lỗi", value="KLP" in f_tags_w, key=f"klp_{suffix}")
+                    t4.checkbox("2 MT", value="2MT" in f_tags_w, key=f"2mt_{suffix}")
+                    t5.checkbox("Căn góc", value="CGO" in f_tags_w, key=f"cgo_{suffix}")
+                    t6.checkbox("TTT", value="TTT" in f_tags_w, key=f"ttt_{suffix}")
+                    t7.checkbox("DTT", value="DTT" in f_tags_w, key=f"dtt_{suffix}")
 
                 render_add_customer_button(df_houses, df_kids, 'add_customer_cloud')
 
@@ -3193,7 +3200,7 @@ def crm_main_interface():
 
                             q_codes = list(prefs.get('quan_phuong', {}).keys())
                             st.session_state.f_quan = [REV_MAP_QUAN.get(q, q) for q in q_codes]
-                            # f_phuong không còn dùng, đã chuyển sang dict_qp_codes
+                            st.session_state.f_phuong = []
                             st.session_state.f_tags = prefs.get('tags', [])
 
                     suffix = "tim" if is_tim_mode else str(kid_id)
