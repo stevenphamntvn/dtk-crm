@@ -1,12 +1,22 @@
 @echo off
-title HE THONG DAI THE KY ADVISOR (CRM V1.0)
-color 0A
-
-:: 1. Tự động chuyển đến thư mục gốc chứa file run.bat này
+setlocal
+title CRM
+color 0E
 cd /d "%~dp0"
-
-:: 2. Chạy Streamlit thông qua module Python để tránh lỗi 'not recognized'
-echo [+] Dang khoi dong CRM Dashboard...
-python -m streamlit run data\crm_app.py
-
-pause
+if not exist "logs" mkdir "logs" >nul 2>&1
+set PYTHONUTF8=1
+cls
+echo.
+echo.
+echo.
+echo     ####  ####   #   #
+echo    #      #   #  ## ##
+echo    #      ####   # # #
+echo    #      #  #   #   #
+echo     ####  #   #  #   #
+echo.
+echo.
+echo.
+python -m streamlit run data\crm_app.py --server.port 8504
+pause >nul
+endlocal

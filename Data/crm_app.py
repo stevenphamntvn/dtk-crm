@@ -305,6 +305,7 @@ UI_WIDTH = {
     "t1_dientich": 55,
     "t1_gia": 55,
     "t1_dinhgia": 55,
+    "t1_pm2": 55,   # Cột giá m²
     "t1_ketcau": 50,
     "t1_dacdiem": 250, # Cột đặc điểm tăng thêm 50px (200 -> 250px)
     "t1_update": 90,
@@ -920,8 +921,8 @@ def pull_latest_houses_only():
             st.error(f"Lỗi: {e}")
 
 def parse_blk(blk_string):
-    """Giải mã chuỗi Protocol chuẩn nguyên khối (Nâng cấp thêm PNx, DTxx, và TGx)"""
-    data = {"ten": "", "min_gia": 0, "max_gia": 0, "quan_phuong": {}, "min_ngang": 0, "min_pn": 0, "min_tang": 0, "min_dt": 0, "tags": []}
+    """Giải mã chuỗi Protocol chuẩn nguyên khối (Nâng cấp thêm PNx, DTxx, TGx, và PM2)"""
+    data = {"ten": "", "min_gia": 0, "max_gia": 0, "quan_phuong": {}, "min_ngang": 0, "min_pn": 0, "min_tang": 0, "min_dt": 0, "max_pm2": 0, "tags": []}
     if not blk_string or pd.isna(blk_string): return data
     
     blk_str = str(blk_string).strip().upper()
@@ -944,30 +945,35 @@ def parse_blk(blk_string):
         
     match_dt = re.search(r'DT(\d+(?:\.\d+)?)', blk_str)
     if match_dt: data["min_dt"] = float(match_dt.group(1))
-    
+
     # [NÂNG CẤP]: Bắt số tầng tối thiểu từ chuỗi TGx
     match_tang = re.search(r'TG(\d+)', blk_str)
     if match_tang: data["min_tang"] = int(match_tang.group(1))
+
+    # [NÂNG CẤP]: Bắt giá m² tối đa từ chuỗi PMx
+    match_pm2 = re.search(r'PM(\d+(?:\.\d+)?)', blk_str)
+    if match_pm2: data["max_pm2"] = float(match_pm2.group(1))
         
     for tag in ["MAT", "HXT", "HXH", "HBG", "TMA", "KLP", "NTC", "TTT", "DTT", "2MT", "CGO"]:
         if tag in blk_str: data["tags"].append(tag)
             
     return data
 
-def build_blk(ten_khach, min_gia, max_gia, dict_qp_codes, min_ngang, min_pn, min_tang, min_dt, tags):
-    """Đóng gói chuỗi Protocol chuẩn (Có thêm Tầng)"""
+def build_blk(ten_khach, min_gia, max_gia, dict_qp_codes, min_ngang, min_pn, min_tang, min_dt, max_pm2, tags):
+    """Đóng gói chuỗi Protocol chuẩn (Có thêm Tầng và Giá m²)"""
     parts = [str(ten_khach)]
     parts.append(f"G{float(min_gia):g}-{float(max_gia):g}T")
-    
+
     q_list = []
     for q_code, ps in dict_qp_codes.items():
         q_list.append(f"{q_code}({','.join(ps)})" if ps else f"{q_code}")
     if q_list: parts.append("+".join(q_list))
-    
+
     if min_ngang > 0: parts.append(f"N{float(min_ngang):g}M")
-    if min_pn > 0: parts.append(f"PN{int(min_pn)}") 
+    if min_pn > 0: parts.append(f"PN{int(min_pn)}")
     if min_tang > 0: parts.append(f"TG{int(min_tang)}") # [NÂNG CẤP] Nạp TGx
     if min_dt > 0: parts.append(f"DT{float(min_dt):g}")
+    if max_pm2 > 0: parts.append(f"PM{float(max_pm2):g}") # [NÂNG CẤP] Nạp PMx
     if tags: parts.append(".".join(tags))
     return ".".join(parts)
 
@@ -996,6 +1002,7 @@ def current_customer_needs(df_houses):
         'min_pn': int(state.get(f'mpn_{suffix}', state.get('f_min_pn', 0))),
         'min_tang': int(state.get(f'mtg_{suffix}', state.get('f_min_tang', 0))),
         'min_dt': float(state.get(f'mdt_{suffix}', state.get('f_min_dt', 0.0))),
+        'max_pm2': float(state.get(f'xpm2_{suffix}', state.get('f_max_pm2', 0.0))),
         'tags': tags,
     }
 
@@ -1116,19 +1123,20 @@ def render_add_customer_button(df_houses, df_kids, key):
 def update_filters_from_kid():
     selected_str = st.session_state.selected_kid_ui
     kid_id = selected_str.split(" - ")[0]
-    
+
     # [VÁ LỖI TỪ APP 2]: Sửa lỗi biến kid_info chưa khai báo
     kid_row = df_kids[df_kids['KID'].astype(str) == kid_id].iloc[0]
     blk_str = str(kid_row.get('bo_loc_KID', kid_row.get('thongtin_KID', ""))).strip()
     prefs = parse_blk(blk_str)
-    
+
     st.session_state.f_min_gia = float(prefs['min_gia'])
     st.session_state.f_max_gia = float(prefs['max_gia'])
     st.session_state.f_ngang = float(prefs['min_ngang'])
-    st.session_state.f_pn = float(prefs.get('min_pn', 0)) 
+    st.session_state.f_pn = float(prefs.get('min_pn', 0))
     st.session_state.f_tang = float(prefs.get('min_tang', 0)) # Nâng cấp thêm số tầng
+    st.session_state.f_max_pm2 = float(prefs.get('max_pm2', 0)) # Nâng cấp thêm giá m² tối đa
     st.session_state.f_quan = list(prefs['quan_phuong'].keys())
-    
+
     for tag in ["MAT", "HXT", "HXH", "HBG", "TMA", "KLP", "NTC"]:
         st.session_state[f"f_tag_{tag}"] = tag in prefs['tags']
 
@@ -1137,7 +1145,8 @@ def get_kid_prefs(kid_id, default_tc, kid_tags_str):
     default_prefs = {
         "min_gia": max(0.0, default_tc - 2.0), "max_gia": default_tc + 1.0,
         "quan": [], "phuong": [], "min_ngang": 3.7, "min_pn": 0, # [MỚI] Thêm min_pn mặc định
-        "mat": "MAT" in str(kid_tags_str), "noh": "NOH" in str(kid_tags_str), 
+        "max_pm2": 0.0, # [MỚI] Thêm max_pm2 mặc định
+        "mat": "MAT" in str(kid_tags_str), "noh": "NOH" in str(kid_tags_str),
         "tma": "TMA" in str(kid_tags_str), "ntc": False, "no_bad": True
     }
     if os.path.exists(FILE_PREFS):
@@ -1246,7 +1255,7 @@ def extract_note(text):
         return match.group(1).strip()
     return ""
 
-def filter_houses(df_houses, min_gia, max_gia, selected_quan, selected_phuong, min_ngang, min_pn, min_tang, min_dt, require_tma, require_ntc, no_bad_fengshui, require_ttt, require_dtt, require_2mt, require_cgo, only_mat, req_hxt, req_hxh, req_hbg):
+def filter_houses(df_houses, min_gia, max_gia, dict_qp_codes, min_ngang, min_pn, min_tang, min_dt, max_pm2, require_tma, require_ntc, no_bad_fengshui, require_ttt, require_dtt, require_2mt, require_cgo, only_mat, req_hxt, req_hxh, req_hbg):
     if df_houses.empty: return pd.DataFrame()
     res = df_houses.copy()
     
@@ -1274,14 +1283,41 @@ def filter_houses(df_houses, min_gia, max_gia, selected_quan, selected_phuong, m
 
     if c_gia in res.columns:
         res = res[(res[c_gia] >= min_gia) & (res[c_gia] <= max_gia)]
-    
-    if selected_quan and c_quan in res.columns:
-        res[c_quan] = res[c_quan].astype(str).str.strip().str.title()
-        res = res[res[c_quan].isin([str(q).title() for q in selected_quan])]
 
-    if selected_phuong and c_phuong in res.columns:
-        res[c_phuong] = res[c_phuong].astype(str).str.strip().str.replace(r'\.0$', '', regex=True).str.title()
-        res = res[res[c_phuong].isin([str(p).title() for p in selected_phuong])]
+    # Lọc theo giá m² tối đa
+    c_pm2 = find_col(CONFIG_GSK_CM["PM2"])
+    if c_pm2 in res.columns:
+        res[c_pm2] = clean_numeric(res[c_pm2])
+        if max_pm2 > 0:
+            res = res[res[c_pm2] <= max_pm2]
+
+    # Lọc theo quận và phường từ dict_qp_codes
+    if dict_qp_codes and c_quan in res.columns:
+        res[c_quan] = res[c_quan].astype(str).str.strip().str.title()
+
+        # Lấy danh sách quận từ dict
+        q_codes = list(dict_qp_codes.keys())
+        selected_quan = [REV_MAP_QUAN.get(q, q) for q in q_codes]
+
+        # Lọc theo quận
+        if selected_quan:
+            res = res[res[c_quan].isin([str(q).title() for q in selected_quan])]
+
+        # Lọc theo phường từng quận
+        if c_phuong in res.columns:
+            res[c_phuong] = res[c_phuong].astype(str).str.strip().str.replace(r'\.0$', '', regex=True).str.title()
+
+            phuong_mask = pd.Series(False, index=res.index)
+            for q_code, p_list in dict_qp_codes.items():
+                q_name = REV_MAP_QUAN.get(q_code, q_code)
+                if p_list:  # Nếu có chọn phường cho quận này
+                    mask_q = res[c_quan] == str(q_name).title()
+                    mask_p = res[c_phuong].isin([str(p).title() for p in p_list])
+                    phuong_mask |= (mask_q & mask_p)
+                else:  # Nếu không chọn phường, lấy tất cả phường của quận
+                    phuong_mask |= (res[c_quan] == str(q_name).title())
+
+            res = res[phuong_mask]
         
     if min_ngang > 0 and c_ngang in res.columns:
         res = res[res[c_ngang] >= float(min_ngang)]
@@ -1838,6 +1874,7 @@ def render_aggrid(results, df_log, kid_id):
     c_gia = get_real_col(CONFIG_GSK_CM["GIA"])
     c_ketcau = get_real_col(CONFIG_GSK_CM["KETCAU"])
     c_pl = get_real_col(CONFIG_GSK_CM["PL"])
+    c_pm2 = get_real_col(CONFIG_GSK_CM["PM2"])
     
     c_link_hidden = COL_LINK_URL  
     c_link_ggd_hidden = COL_LINK_GGD 
@@ -1889,9 +1926,9 @@ def render_aggrid(results, df_log, kid_id):
 
     # Danh sách hiển thị dùng TÊN CỘT THỰC TẾ
     display_cols = [
-        'Trạng thái', c_pl, c_quan, c_phuong, 
-        c_sonha, 'GGD', c_tenduong, c_ngang, 
-        c_dai, c_dt, c_gia, 'Định giá', c_ketcau, 
+        'Trạng thái', c_pl, c_quan, c_phuong,
+        c_sonha, 'GGD', c_tenduong, c_ngang,
+        c_dai, c_dt, c_gia, 'Định giá', c_pm2, c_ketcau,
         'dacdiem', c_update, c_uid, c_cus, 'note_rieng',
         c_link_hidden, c_link_ggd_hidden
     ]
@@ -1945,7 +1982,8 @@ def render_aggrid(results, df_log, kid_id):
     """)
     gb.configure_column(c_gia, type=["numericColumn"], width=UI_WIDTH["t1_gia"], minWidth=UI_WIDTH["t1_gia"], maxWidth=UI_WIDTH["t1_gia"], cellStyle=gia_sale_style)
     gb.configure_column('Định giá', type=["numericColumn"], width=UI_WIDTH["t1_dinhgia"], minWidth=UI_WIDTH["t1_dinhgia"], maxWidth=UI_WIDTH["t1_dinhgia"], cellStyle={'color': '#D97706', 'fontWeight': 'bold'})
-    
+    gb.configure_column(c_pm2, header_name="Giá m²", type=["numericColumn"], width=UI_WIDTH["t1_pm2"], minWidth=UI_WIDTH["t1_pm2"], maxWidth=UI_WIDTH["t1_pm2"])
+
     gb.configure_column(c_ketcau, width=UI_WIDTH["t1_ketcau"], minWidth=UI_WIDTH["t1_ketcau"], maxWidth=UI_WIDTH["t1_ketcau"])
     gb.configure_column('dacdiem', header_name="Đặc điểm", width=UI_WIDTH["t1_dacdiem"], minWidth=UI_WIDTH["t1_dacdiem"], maxWidth=UI_WIDTH["t1_dacdiem"])
     gb.configure_column(c_update, header_name="Cập nhật", width=UI_WIDTH["t1_update"], minWidth=UI_WIDTH["t1_update"], maxWidth=UI_WIDTH["t1_update"])
@@ -2792,13 +2830,14 @@ def crm_main_interface():
                         parsed_max_gia = float(prefs.get('max_gia', 0.0))
                         st.session_state.f_max_gia = parsed_max_gia if parsed_max_gia > 0 else 100.0
                         st.session_state.f_ngang = float(prefs.get('min_ngang', 0.0))
-                        st.session_state.f_min_pn = float(prefs.get('min_pn', 0.0)) 
-                        st.session_state.f_min_tang = float(prefs.get('min_tang', 0.0)) 
-                        st.session_state.f_min_dt = float(prefs.get('min_dt', 0.0)) 
-                        
+                        st.session_state.f_min_pn = float(prefs.get('min_pn', 0.0))
+                        st.session_state.f_min_tang = float(prefs.get('min_tang', 0.0))
+                        st.session_state.f_min_dt = float(prefs.get('min_dt', 0.0))
+                        st.session_state.f_max_pm2 = float(prefs.get('max_pm2', 0.0))
+
                         q_codes = list(prefs.get('quan_phuong', {}).keys())
                         st.session_state.f_quan = [REV_MAP_QUAN.get(q, q) for q in q_codes]
-                        st.session_state.f_phuong = [p for sub in prefs.get('quan_phuong', {}).values() for p in sub]
+                        # f_phuong không còn dùng, đã chuyển sang dict_qp_codes
                         st.session_state.f_tags = prefs.get('tags', [])
 
                 suffix = "tim" if is_tim_mode else str(kid_id)
@@ -2818,6 +2857,7 @@ def crm_main_interface():
                 min_pn = float(st.session_state.get(f"mpn_{suffix}", st.session_state.f_min_pn))
                 min_tang = float(st.session_state.get(f"mtg_{suffix}", st.session_state.get('f_min_tang', 0.0)))
                 min_dt = float(st.session_state.get(f"mdt_{suffix}", st.session_state.f_min_dt))
+                max_pm2 = float(st.session_state.get(f"xpm2_{suffix}", st.session_state.get('f_max_pm2', 0.0)))
 
                 f_mat = bool(st.session_state.get(f"mat_{suffix}", "MAT" in st.session_state.f_tags))
                 f_hxt = bool(st.session_state.get(f"hxt_{suffix}", "HXT" in st.session_state.f_tags))
@@ -2834,7 +2874,7 @@ def crm_main_interface():
 
                 # --- 3. BẢNG KẾT QUẢ TÌM KIẾM (FULL-WIDTH TRÀN VIỀN) ---
                 st.subheader("3. Kết quả tìm kiếm (Kho Hàng Phù Hợp)")
-                args = (min_gia, max_gia, sel_q, sel_p, min_n, min_pn, min_tang, min_dt, f_tma, f_ntc, f_klp, f_ttt, f_dtt, f_2mt, f_cgo, f_mat, f_hxt, f_hxh, f_hbg)
+                args = (min_gia, max_gia, dict_qp_codes, min_n, min_pn, min_tang, min_dt, max_pm2, f_tma, f_ntc, f_klp, f_ttt, f_dtt, f_2mt, f_cgo, f_mat, f_hxt, f_hxh, f_hbg)
                 results = filter_houses(df_h_clean, *args)
                 
                 if not results.empty:
@@ -2858,21 +2898,19 @@ def crm_main_interface():
                             
                     with btn_col2:
                         if st.button("💾 LƯU BỘ LỌC", use_container_width=True, disabled=is_tim_mode):
-                            d_qp = {}
-                            for q in sel_q:
-                                q_code = MAP_QUAN.get(q, f"Q{q.replace('Quận ', '').replace(' ', '').upper()}")
-                                d_qp[q_code] = [str(p) for p in sel_p]
-                            
-                            tags = [t for t, v in zip(["MAT","HXT","HXH","HBG","TMA","NTC","KLP","TTT","DTT","2MT","CGO"], 
+                            # dict_qp_codes đã được tạo từ dynamic columns
+                            d_qp = dict_qp_codes
+
+                            tags = [t for t, v in zip(["MAT","HXT","HXH","HBG","TMA","NTC","KLP","TTT","DTT","2MT","CGO"],
                                                       [f_mat, f_hxt, f_hxh, f_hbg, f_tma, f_ntc, f_klp, f_ttt, f_dtt, f_2mt, f_cgo]) if v]
-                            
+
                             old_blk = str(df_kids.loc[df_kids['KID'].astype(str) == str(kid_id), 'bo_loc_KID'].values[0])
-                            if not old_blk or old_blk == 'nan': 
+                            if not old_blk or old_blk == 'nan':
                                 old_blk = str(df_kids.loc[df_kids['KID'].astype(str) == str(kid_id), 'thongtin_KID'].values[0])
-                            
+
                             name_kh = parse_blk(old_blk).get('ten', 'Khach')
-                            new_blk = build_blk(name_kh, min_gia, max_gia, d_qp, min_n, min_pn, min_tang, min_dt, tags)
-                            
+                            new_blk = build_blk(name_kh, min_gia, max_gia, d_qp, min_n, min_pn, min_tang, min_dt, max_pm2, tags)
+
                             df_kids.loc[df_kids['KID'].astype(str) == str(kid_id), 'bo_loc_KID'] = new_blk
                             df_kids.to_csv(FILE_KID, index=False)
                             st.toast("✅ Đã lưu bộ lọc thành công!")
@@ -2903,13 +2941,11 @@ def crm_main_interface():
                                     schedule_dict = {}
                                     for uid in selected_uids:
                                         schedule_dict[uid] = st.session_state.get(f"d_{uid}", datetime.now().date())
-                                        
-                                    d_qp = {}
-                                    for q in sel_q:
-                                        q_code = MAP_QUAN.get(q, f"Q{q.replace('Quận ', '').replace(' ', '').upper()}")
-                                        d_qp[q_code] = [str(p) for p in sel_p]
-                                    
-                                    tags = [t for t, v in zip(["MAT","HXT","HXH","HBG","TMA","NTC","KLP","TTT","DTT","2MT","CGO"], 
+
+                                    # dict_qp_codes đã được tạo từ dynamic columns
+                                    d_qp = dict_qp_codes
+
+                                    tags = [t for t, v in zip(["MAT","HXT","HXH","HBG","TMA","NTC","KLP","TTT","DTT","2MT","CGO"],
                                                               [f_mat, f_hxt, f_hxh, f_hbg, f_tma, f_ntc, f_klp, f_ttt, f_dtt, f_2mt, f_cgo]) if v]
                                     kid_row = df_kids[df_kids['KID'].astype(str).str.strip() == str(kid_id)]
                                     if not kid_row.empty:
@@ -2918,8 +2954,8 @@ def crm_main_interface():
                                         name_kh = ttk_value.split('.')[0] if '.' in ttk_value else ttk_value
                                     else:
                                         name_kh = str(kid_id)
-                                    
-                                    new_blk = build_blk(name_kh, min_gia, max_gia, d_qp, min_n, min_pn, min_tang, min_dt, tags)
+
+                                    new_blk = build_blk(name_kh, min_gia, max_gia, d_qp, min_n, min_pn, min_tang, min_dt, max_pm2, tags)
                                     df_kids.loc[df_kids['KID'].astype(str) == str(kid_id), 'bo_loc_KID'] = new_blk
                                     df_kids.to_csv(FILE_KID, index=False)
                                     
@@ -2966,11 +3002,12 @@ def crm_main_interface():
                             if not is_tim_mode:
                                 st.session_state['app_mode'] = 'TIM_KHACH'
                                 st.session_state.f_min_gia = 0.0
-                                st.session_state.f_max_gia = 1000.0 
+                                st.session_state.f_max_gia = 1000.0
                                 st.session_state.f_ngang = 0.0
                                 st.session_state.f_min_pn = 0.0
                                 st.session_state.f_min_tang = 0.0
                                 st.session_state.f_min_dt = 0.0
+                                st.session_state.f_max_pm2 = 0.0
                                 st.session_state.f_quan = []
                                 st.session_state.f_phuong = []
                                 st.session_state.f_tags = []
@@ -3005,14 +3042,45 @@ def crm_main_interface():
                 cf1, cf2, cf3, cf4 = st.columns(4)
                 cf1.number_input("Giá từ (Tỷ)", value=st.session_state.f_min_gia, step=1.0, key=f"mg_{suffix}")
                 cf2.number_input("Đến (Tỷ)", value=st.session_state.f_max_gia, step=1.0, key=f"xg_{suffix}")
-                cf3.multiselect("Chọn Quận", districts, default=valid_default_q, key=f"q_{suffix}")
-                cf4.multiselect("Chọn Phường", list_p, default=valid_default_p, key=f"p_{suffix}")
+                cf3.number_input("Giá m² tối đa", value=st.session_state.get('f_max_pm2', 0.0), step=0.5, key=f"xpm2_{suffix}")
+                cf4.multiselect("Chọn Quận", districts, default=valid_default_q, key=f"q_{suffix}")
+
+                # Dynamic columns cho từng quận đã chọn
+                if sel_q:
+                    st.write("**📍 Chọn Phường cho từng Quận:**")
+                    # Lấy danh sách phường cho từng quận
+                    quan_phuong_map = {}
+                    for q in sel_q:
+                        q_p = active_houses[active_houses[CONFIG_GSK_CM["QUAN"]].str.title() == q][CONFIG_GSK_CM["PHUONG"]].astype(str).str.replace(r'\.0$', '', regex=True).unique().tolist()
+                        # Convert tất cả về string trước khi sort
+                        quan_phuong_map[q] = sorted([str(p) for p in q_p])
+
+                    # Parse preferences hiện tại để set default
+                    prefs = parse_blk(st.session_state.get('active_blk', ''))
+                    quan_phuong_prefs = prefs.get('quan_phuong', {})
+
+                    # Create dynamic columns
+                    col_count = min(len(sel_q), 4)
+                    district_cols = st.columns(col_count)
+
+                    dict_qp_codes = {}
+                    for idx, q in enumerate(sel_q):
+                        with district_cols[idx % col_count]:
+                            phuong_list = quan_phuong_map[q]
+                            q_code = MAP_QUAN.get(q, f"Q{q.replace('Quận ', '').replace(' ', '').upper()}")
+                            default_p = quan_phuong_prefs.get(q_code, [])
+                            selected_p = st.multiselect(f"{q}", phuong_list, default=default_p, key=f"p_{q}_{suffix}")
+                            dict_qp_codes[q_code] = selected_p
+                else:
+                    dict_qp_codes = {}
 
                 cf5, cf6, cf7, cf8 = st.columns(4)
                 cf5.number_input("Ngang (m)", value=st.session_state.f_ngang, step=1.0, key=f"mn_{suffix}")
-                cf6.number_input("Số PN", value=int(st.session_state.f_min_pn), step=1, format="%d", key=f"mpn_{suffix}") 
-                cf7.number_input("Số Tầng", value=int(st.session_state.get('f_min_tang', 0.0)), step=1, format="%d", key=f"mtg_{suffix}") 
-                cf8.number_input("DT (m2)", value=float(st.session_state.f_min_dt), step=5.0, key=f"mdt_{suffix}") 
+                cf6.number_input("Số PN", value=int(st.session_state.f_min_pn), step=1, format="%d", key=f"mpn_{suffix}")
+                cf7.number_input("Số Tầng", value=int(st.session_state.get('f_min_tang', 0.0)), step=1, format="%d", key=f"mtg_{suffix}")
+
+                cf9, cf10 = st.columns(2)
+                cf9.number_input("DT (m2)", value=float(st.session_state.f_min_dt), step=5.0, key=f"mdt_{suffix}") 
 
                 col_vitri, col_dacdiem = st.columns(2)
                 with col_vitri:
@@ -3118,13 +3186,14 @@ def crm_main_interface():
                             parsed_max_gia = float(prefs.get('max_gia', 0.0))
                             st.session_state.f_max_gia = parsed_max_gia if parsed_max_gia > 0 else 100.0
                             st.session_state.f_ngang = float(prefs.get('min_ngang', 0.0))
-                            st.session_state.f_min_pn = float(prefs.get('min_pn', 0.0)) 
-                            st.session_state.f_min_tang = float(prefs.get('min_tang', 0.0)) 
-                            st.session_state.f_min_dt = float(prefs.get('min_dt', 0.0)) 
-                            
+                            st.session_state.f_min_pn = float(prefs.get('min_pn', 0.0))
+                            st.session_state.f_min_tang = float(prefs.get('min_tang', 0.0))
+                            st.session_state.f_min_dt = float(prefs.get('min_dt', 0.0))
+                            st.session_state.f_max_pm2 = float(prefs.get('max_pm2', 0.0))
+
                             q_codes = list(prefs.get('quan_phuong', {}).keys())
                             st.session_state.f_quan = [REV_MAP_QUAN.get(q, q) for q in q_codes]
-                            st.session_state.f_phuong = [p for sub in prefs.get('quan_phuong', {}).values() for p in sub]
+                            # f_phuong không còn dùng, đã chuyển sang dict_qp_codes
                             st.session_state.f_tags = prefs.get('tags', [])
 
                     suffix = "tim" if is_tim_mode else str(kid_id)
@@ -3135,13 +3204,39 @@ def crm_main_interface():
                         
                     min_gia = st.number_input("Giá từ (Tỷ)", value=st.session_state.f_min_gia, step=1.0, key=f"mg_{suffix}")
                     max_gia = st.number_input("Đến (Tỷ)", value=st.session_state.f_max_gia, step=1.0, key=f"xg_{suffix}")
-                    
+                    max_pm2 = st.number_input("Giá m² tối đa", value=st.session_state.get('f_max_pm2', 0.0), step=0.5, key=f"xpm2_{suffix}")
+
                     valid_default_q = [q for q in st.session_state.f_quan if q in districts]
                     sel_q = st.multiselect("Chọn Quận", districts, default=valid_default_q, key=f"q_{suffix}")
-                    
-                    list_p = active_houses[active_houses[CONFIG_GSK_CM["QUAN"]].str.title().isin(sel_q)][CONFIG_GSK_CM["PHUONG"]].astype(str).str.replace(r'\.0$', '', regex=True).unique().tolist() if sel_q else []
-                    valid_default_p = [p for p in st.session_state.f_phuong if p in list_p]
-                    sel_p = st.multiselect("Chọn Phường", list_p, default=valid_default_p, key=f"p_{suffix}")
+
+                    # Dynamic columns cho từng quận đã chọn
+                    if sel_q:
+                        st.write("**📍 Chọn Phường cho từng Quận:**")
+                        # Lấy danh sách phường cho từng quận
+                        quan_phuong_map = {}
+                        for q in sel_q:
+                            q_p = active_houses[active_houses[CONFIG_GSK_CM["QUAN"]].str.title() == q][CONFIG_GSK_CM["PHUONG"]].astype(str).str.replace(r'\.0$', '', regex=True).unique().tolist()
+                            # Convert tất cả về string trước khi sort
+                            quan_phuong_map[q] = sorted([str(p) for p in q_p])
+
+                        # Parse preferences hiện tại để set default
+                        prefs = parse_blk(st.session_state.get('active_blk', ''))
+                        quan_phuong_prefs = prefs.get('quan_phuong', {})
+
+                        # Create dynamic columns
+                        col_count = min(len(sel_q), 4)
+                        district_cols = st.columns(col_count)
+
+                        dict_qp_codes = {}
+                        for idx, q in enumerate(sel_q):
+                            with district_cols[idx % col_count]:
+                                phuong_list = quan_phuong_map[q]
+                                q_code = MAP_QUAN.get(q, f"Q{q.replace('Quận ', '').replace(' ', '').upper()}")
+                                default_p = quan_phuong_prefs.get(q_code, [])
+                                selected_p = st.multiselect(f"{q}", phuong_list, default=default_p, key=f"p_{q}_{suffix}")
+                                dict_qp_codes[q_code] = selected_p
+                    else:
+                        dict_qp_codes = {}
                     
                     col_n1, col_n2 = st.columns(2)
                     min_n = col_n1.number_input("Ngang (m)", value=st.session_state.f_ngang, step=1.0, key=f"mn_{suffix}")
@@ -3172,7 +3267,7 @@ def crm_main_interface():
 
                 with col_right:
                     st.subheader("3. Kết quả tìm kiếm")
-                    args = (min_gia, max_gia, sel_q, sel_p, min_n, min_pn, min_tang, min_dt, f_tma, f_ntc, f_klp, f_ttt, f_dtt, f_2mt, f_cgo, f_mat, f_hxt, f_hxh, f_hbg)
+                    args = (min_gia, max_gia, dict_qp_codes, min_n, min_pn, min_tang, min_dt, max_pm2, f_tma, f_ntc, f_klp, f_ttt, f_dtt, f_2mt, f_cgo, f_mat, f_hxt, f_hxh, f_hbg)
                     results = filter_houses(df_h_clean, *args)
                     
                     if not results.empty:
@@ -3196,24 +3291,22 @@ def crm_main_interface():
                                 
                         with btn_col2:
                             if st.button("💾 LƯU BỘ LỌC", use_container_width=True, disabled=is_tim_mode):
-                                d_qp = {}
-                                for q in sel_q:
-                                    q_code = MAP_QUAN.get(q, f"Q{q.replace('Quận ', '').replace(' ', '').upper()}")
-                                    d_qp[q_code] = [str(p) for p in sel_p]
-                                
-                                tags = [t for t, v in zip(["MAT","HXT","HXH","HBG","TMA","NTC","KLP","TTT","DTT","2MT","CGO"], 
+                                # dict_qp_codes đã được tạo từ dynamic columns
+                                d_qp = dict_qp_codes
+
+                                tags = [t for t, v in zip(["MAT","HXT","HXH","HBG","TMA","NTC","KLP","TTT","DTT","2MT","CGO"],
                                                           [f_mat, f_hxt, f_hxh, f_hbg, f_tma, f_ntc, f_klp, f_ttt, f_dtt, f_2mt, f_cgo]) if v]
-                                
+
                                 old_blk = str(df_kids.loc[df_kids['KID'].astype(str) == str(kid_id), 'bo_loc_KID'].values[0])
-                                if not old_blk or old_blk == 'nan': 
+                                if not old_blk or old_blk == 'nan':
                                     old_blk = str(df_kids.loc[df_kids['KID'].astype(str) == str(kid_id), 'thongtin_KID'].values[0])
-                                
+
                                 name_kh = parse_blk(old_blk).get('ten', 'Khach')
-                                new_blk = build_blk(name_kh, min_gia, max_gia, d_qp, min_n, min_pn, min_tang, min_dt, tags)
-                                
+                                new_blk = build_blk(name_kh, min_gia, max_gia, d_qp, min_n, min_pn, min_tang, min_dt, max_pm2, tags)
+
                                 df_kids.loc[df_kids['KID'].astype(str) == str(kid_id), 'bo_loc_KID'] = new_blk
                                 df_kids.to_csv(FILE_KID, index=False)
-                                
+
                                 st.toast("✅ Đã lưu bộ lọc thành công!")
                                 
                         with btn_col3:
@@ -3242,13 +3335,11 @@ def crm_main_interface():
                                         schedule_dict = {}
                                         for uid in selected_uids:
                                             schedule_dict[uid] = st.session_state.get(f"d_{uid}", datetime.now().date())
-                                            
-                                        d_qp = {}
-                                        for q in sel_q:
-                                            q_code = MAP_QUAN.get(q, f"Q{q.replace('Quận ', '').replace(' ', '').upper()}")
-                                            d_qp[q_code] = [str(p) for p in sel_p]
-                                        
-                                        tags = [t for t, v in zip(["MAT","HXT","HXH","HBG","TMA","NTC","KLP","TTT","DTT","2MT","CGO"], 
+
+                                        # dict_qp_codes đã được tạo từ dynamic columns
+                                        d_qp = dict_qp_codes
+
+                                        tags = [t for t, v in zip(["MAT","HXT","HXH","HBG","TMA","NTC","KLP","TTT","DTT","2MT","CGO"],
                                                                   [f_mat, f_hxt, f_hxh, f_hbg, f_tma, f_ntc, f_klp, f_ttt, f_dtt, f_2mt, f_cgo]) if v]
                                         kid_row = df_kids[df_kids['KID'].astype(str).str.strip() == str(kid_id)]
                                         if not kid_row.empty:
@@ -3257,8 +3348,8 @@ def crm_main_interface():
                                             name_kh = ttk_value.split('.')[0] if '.' in ttk_value else ttk_value
                                         else:
                                             name_kh = str(kid_id)
-                                        
-                                        new_blk = build_blk(name_kh, min_gia, max_gia, d_qp, min_n, min_pn, min_tang, min_dt, tags)
+
+                                        new_blk = build_blk(name_kh, min_gia, max_gia, d_qp, min_n, min_pn, min_tang, min_dt, max_pm2, tags)
                                         df_kids.loc[df_kids['KID'].astype(str) == str(kid_id), 'bo_loc_KID'] = new_blk
                                         df_kids.to_csv(FILE_KID, index=False)
                                         
