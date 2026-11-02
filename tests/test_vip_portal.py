@@ -130,6 +130,19 @@ class TestVipPortal(unittest.TestCase):
         self.assertGreaterEqual(len(match), 1)
         self.assertEqual(match.iloc[-1]['hanh_dong'], 'XEM_SO_NHA')
 
+    def test_demo_k053_fallback_authentication(self):
+        # Khi df_kids trống hoặc không có K053, Demo K053 vẫn hoạt động với pass 345678 / 123456
+        df_kids_empty = pd.DataFrame(columns=['KID', 'thongtin_KID', 'sdt'])
+        ok, info, err = authenticate_vip_customer("K053", "345678", df_kids_empty)
+        self.assertTrue(ok)
+        self.assertEqual(info['kid'], 'KID_053')
+        self.assertEqual(info['phone'], '0912345678')
+
+        # Test pass sai cho K053
+        ok, info, err = authenticate_vip_customer("K053", "000000", df_kids_empty)
+        self.assertFalse(ok)
+        self.assertIn("Mật khẩu không đúng", err)
+
 
 if __name__ == '__main__':
     unittest.main()

@@ -2550,6 +2550,11 @@ def check_authentication():
                 else:
                     # Kiểm tra Khách VIP từ Query Params
                     df_k_auth = safe_read(FILE_KID)
+                    if df_k_auth.empty:
+                        try:
+                            df_k_auth, _ = pull_khoi_khach_va_log(pull_kids=True, pull_logs=False)
+                        except Exception:
+                            df_k_auth = safe_read(FILE_KID)
                     kid_t = normalize_kid(q_user)
                     matches = df_k_auth[df_k_auth['KID'].astype(str).str.strip().str.upper() == kid_t] if not df_k_auth.empty else pd.DataFrame()
                     if not matches.empty:
@@ -2637,6 +2642,11 @@ def check_authentication():
                 # B. Kiểm tra Khách VIP
                 else:
                     df_k_auth = safe_read(FILE_KID)
+                    if df_k_auth.empty:
+                        try:
+                            df_k_auth, _ = pull_khoi_khach_va_log(pull_kids=True, pull_logs=False)
+                        except Exception:
+                            df_k_auth = safe_read(FILE_KID)
                     is_vip, vip_data, vip_err = authenticate_vip_customer(username_input, password_input, df_k_auth)
                     if is_vip:
                         auth_token = generate_auth_token(username_input, password_input)
