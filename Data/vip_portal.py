@@ -31,6 +31,58 @@ VIP_TRACKING_COLUMNS = [
     "timestamp", "kid", "ten_khach", "uid", "sonha", "tenduong", "quan_phuong", "gia", "hanh_dong", "chi_tiet"
 ]
 
+MAP_QUAN = {
+    "Bình Thạnh": "QBT", "Phú Nhuận": "QPN", "Gò Vấp": "QGV",
+    "Tân Bình": "QTB", "Tân Phú": "QTP", "Bình Tân": "QBTA",
+    "Quận 1": "Q1", "Quận 3": "Q3", "Quận 10": "Q10", "Quận 11": "Q11",
+    "Quận 2": "Q2", "Quận 4": "Q4", "Quận 5": "Q5", "Quận 6": "Q6",
+    "Quận 7": "Q7", "Quận 8": "Q8", "Quận 9": "Q9", "Quận 12": "Q12"
+}
+REV_MAP_QUAN = {v: k for k, v in MAP_QUAN.items()}
+
+def parse_blk(blk_string):
+    data = {"ten": "", "min_gia": 0, "max_gia": 0, "quan_phuong": {}, "min_ngang": 0, "min_pn": 0, "min_tang": 0, "min_dt": 0, "max_pm2": 0, "tags": []}
+    if not blk_string or pd.isna(blk_string): return data
+    
+    blk_str = str(blk_string).strip().upper()
+    parts = blk_str.split('.')
+    if parts: data["ten"] = parts[0]
+        
+    match_g = re.search(r'G(\d+(?:\.\d+)?)-(\d+(?:\.\d+)?)T', blk_str)
+    if match_g:
+        data["min_gia"] = float(match_g.group(1))
+        data["max_gia"] = float(match_g.group(2))
+    else:
+        match_g_single = re.search(r'G(\d+(?:\.\d+)?)T', blk_str)
+        if match_g_single:
+            data["min_gia"] = 0
+            data["max_gia"] = float(match_g_single.group(1))
+            
+    match_qp = re.findall(r'([A-Z0-9]+)(?:\(([^)]+)\))?', blk_str)
+    for q_code, wards in match_qp:
+        if q_code.startswith('Q'):
+            data["quan_phuong"][q_code] = [w.strip() for w in wards.split(',')] if wards else []
+            
+    match_n = re.search(r'N(\d+(?:\.\d+)?)M', blk_str)
+    if match_n: data["min_ngang"] = float(match_n.group(1))
+        
+    match_pn = re.search(r'PN(\d+)', blk_str)
+    if match_pn: data["min_pn"] = int(match_pn.group(1))
+        
+    match_dt = re.search(r'DT(\d+(?:\.\d+)?)', blk_str)
+    if match_dt: data["min_dt"] = float(match_dt.group(1))
+
+    match_tang = re.search(r'TG(\d+)', blk_str)
+    if match_tang: data["min_tang"] = int(match_tang.group(1))
+
+    match_pm2 = re.search(r'PM(\d+(?:\.\d+)?)', blk_str)
+    if match_pm2: data["max_pm2"] = float(match_pm2.group(1))
+        
+    for tag in ["MAT", "HXT", "HXH", "HBG", "TMA", "KLP", "NTC", "TTT", "DTT", "2MT", "CGO"]:
+        if tag in blk_str: data["tags"].append(tag)
+            
+    return data
+
 
 # ==============================================================================
 # 1. HÀM CHUẨN HÓA VÀ XÁC THỰC KHÁCH VIP
@@ -334,10 +386,7 @@ def render_vip_portal(df_houses: pd.DataFrame, df_kids: pd.DataFrame, gc=None, s
     if not kid_row.empty:
         blk_str = str(kid_row.iloc[0].get('bo_loc_KID', kid_row.iloc[0].get('thongtin_KID', ''))).strip()
         # Parse chuỗi BLK
-        from crm_app import parse_blk, REV_MAP_QUAN, MAP_QUAN
         default_prefs = parse_blk(blk_str)
-    else:
-        from crm_app import REV_MAP_QUAN, MAP_QUAN
 
     # --- TAB 1: KHÁM PHÁ KHO NHÀ ---
     with tab_explore:

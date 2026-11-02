@@ -290,6 +290,19 @@ FILE_LOG = os.path.join(CACHE_DIR, "kid_log_cache.csv")
 FILE_PENDING = os.path.join(CACHE_DIR, "pending_logs.csv")
 FILE_PREFS = os.path.join(CACHE_DIR, "filter_prefs.json") # File não bộ CRM
 FILE_LAST_KID = os.path.join(CACHE_DIR, "last_kid_cache.txt") # <--- THÊM DÒNG NÀY VÀO ĐÂY
+
+def safe_read(filepath):
+    """Đọc file an toàn ở phạm vi toàn module"""
+    if os.path.exists(filepath) and os.path.getsize(filepath) > 0:
+        try:
+            df = pd.read_csv(filepath, dtype=str, encoding='utf-8-sig')
+            df.columns = df.columns.str.strip()
+            return df
+        except pd.errors.EmptyDataError:
+            return pd.DataFrame()
+        except Exception:
+            return pd.DataFrame()
+    return pd.DataFrame()
 # --- TỪ ĐIỂN ĐỒNG BỘ NGÔN NGỮ (GSK <-> BLK) NGUYÊN KHỐI ---
 MAP_QUAN = {
     "Bình Thạnh": "QBT", "Phú Nhuận": "QPN", "Gò Vấp": "QGV",
