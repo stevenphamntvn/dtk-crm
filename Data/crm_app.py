@@ -2685,7 +2685,12 @@ check_authentication()
 # Nếu là khách VIP -> Chuyển hướng sang VIP Client Portal
 if st.session_state.get('user_role') == 'client_vip':
     df_houses_vip, df_kids_vip, _ = load_local_data()
-    render_vip_portal(df_houses_vip, df_kids_vip, gc=get_gspread_client(), sheet_id=SHEET_ID, filter_houses_func=filter_houses)
+    render_vip_portal(
+        df_houses_vip, df_kids_vip,
+        gc=get_gspread_client(), sheet_id=SHEET_ID,
+        filter_houses_func=filter_houses,
+        pull_houses_func=pull_latest_houses_only
+    )
     st.stop()
 
 # ==========================================

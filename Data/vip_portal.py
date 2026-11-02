@@ -40,6 +40,159 @@ MAP_QUAN = {
 }
 REV_MAP_QUAN = {v: k for k, v in MAP_QUAN.items()}
 
+try:
+    from st_aggrid import AgGrid, GridOptionsBuilder, JsCode, GridUpdateMode, DataReturnMode
+except ImportError:
+    AgGrid = None
+    GridOptionsBuilder = None
+    JsCode = None
+    GridUpdateMode = None
+    DataReturnMode = None
+
+
+def clean_numeric(series):
+    """Làm sạch các giá trị số từ chuỗi dữ liệu"""
+    return pd.to_numeric(
+        series.astype(str).str.replace(',', '.', regex=False).str.extract(r'(\d+\.?\d*)')[0],
+        errors='coerce'
+    ).fillna(0.0)
+
+
+def extract_highlight(text):
+    """Trích xuất các đặc điểm quan trọng từ mô tả chi tiết"""
+    if not text or pd.isna(text):
+        return ""
+    t_upper = str(text).upper()
+    found = []
+    tags = [
+        "TOH", "2MT", "CGO", "P1C", "T1C", "GAC", "GCH", "DAD", "NTC", "SA4",
+        "NOH", "MTR", "QHH", "TTT", "DTT", "CVI", "GCV", "VLA", "VPH", "TMA",
+        "MAT", "HXT", "HXH", "HBG", "KLP"
+    ]
+    for t in tags:
+        if t in t_upper and t not in found:
+            found.append(t)
+    dynamic_matches = re.findall(r'\b(PN|SCN|SLG|QH|DTN)\s*(\d+)\b', t_upper)
+    for prefix, num in dynamic_matches:
+        tag = f"{prefix}{num}"
+        if tag not in found:
+            found.append(tag)
+    return ", ".join(found)
+
+
+def extract_note(text):
+    """Trích xuất ghi chú riêng N(...) từ mô tả chi tiết"""
+    if not text or pd.isna(text):
+        return ""
+    match = re.search(r'(?i)N\(([\s\S]*?)\)', str(text))
+    if match:
+        return match.group(1).strip()
+    return ""
+
+
+def apply_dinh_gia(df, c_mota, c_dt, c_q):
+    """Tính định giá tham khảo độc lập cho khách VIP"""
+    def parse_num(val):
+        try:
+            return float(str(val).strip().replace(',', '.'))
+        except Exception:
+            return 0.0
+
+    def calc(row):
+        try:
+            mota = str(row.get(c_mota, ""))
+            sm_num = parse_num(row.get(c_dt, 0))
+            dongia = parse_num(row.get(c_q, 0))
+            if dongia <= 0 or sm_num <= 0:
+                return None
+            slg_match = re.search(r'(?i)SLG\s*([0-9.,]+)', mota)
+            slg_val = float(slg_match.group(1).replace(',', '.')) if slg_match else 0.0
+            scn_match = re.search(r'(?i)SCN\s*([0-9.,]+)', mota)
+            scn_val = float(scn_match.group(1).replace(',', '.')) if scn_match else 0.0
+            scn_final = scn_val if scn_val > 0 else sm_num
+            sm_final = max(sm_num, scn_final)
+            slg_final = slg_val if slg_val > 0 else scn_final
+            scn_final = max(scn_final, slg_final)
+            sm_final = max(sm_final, scn_final)
+            sdg_val = slg_final + (scn_final - slg_final) * 0.5 + (sm_final - scn_final) * 0.25
+            return round((sdg_val * dongia) / 1000, 1)
+        except Exception:
+            pass
+        return None
+
+    df_out = df.copy()
+    df_out['Định giá'] = df_out.apply(calc, axis=1)
+    return df_out
+
+
+def get_vip_aggrid_js():
+    """Tập hợp mã JavaScript tối ưu cho AgGrid Khách VIP"""
+    return {
+        "quantam_click": JsCode("""
+        function(params) {
+            if (params.event && params.event.detail === 1) {
+                const current = params.value;
+                const nextVal = (current === '✅ Đã chọn') ? '⭐ Chọn' : '✅ Đã chọn';
+                params.node.setDataValue('⭐', nextVal);
+            }
+        }
+        """),
+        "sonha_click": JsCode("""
+        function(params) {
+            const val = params.value;
+            if (val && val.toString().indexOf('***') !== -1) {
+                const real = params.node.data['_real_sonha'] || '---';
+                params.node.setDataValue('Số nhà', real);
+                params.node.setDataValue('_reveal_trigger', params.node.data['_uid']);
+            }
+        }
+        """),
+        "sonha_style": JsCode("""
+        function(params) {
+            const val = params.value;
+            if (val && val.toString().indexOf('***') !== -1) {
+                return {'color': '#38bdf8', 'fontWeight': 'bold', 'cursor': 'pointer', 'textDecoration': 'underline'};
+            }
+            return {'fontWeight': 'bold'};
+        }
+        """),
+        "open_ggd_click": JsCode("""
+        function(params) {
+            const linkVal = params.node.data['_link_ggd'];
+            if (linkVal && linkVal.startsWith('http')) {
+                window.open(linkVal, '_blank');
+                params.node.setDataValue('_link_trigger', params.node.data['_uid']);
+            }
+        }
+        """),
+        "ggd_style": JsCode("""
+        function(params) {
+            const linkVal = params.node.data['_link_ggd'];
+            if (linkVal && linkVal.startsWith('http')) {
+                return {'cursor': 'pointer', 'fontSize': '16px', 'textAlign': 'center'};
+            }
+            return {'color': '#6c757d', 'fontSize': '14px', 'textAlign': 'center'};
+        }
+        """),
+        "gia_sale_style": JsCode("""
+        function(params) {
+            if (params.value && params.data['Định giá']) {
+                const gia = parseFloat(params.value);
+                const dinhGia = parseFloat(params.data['Định giá']);
+                if (!isNaN(gia) && !isNaN(dinhGia) && gia < dinhGia) {
+                    return {'color': '#10B981', 'fontWeight': 'bold'};
+                }
+            }
+            return null;
+        }
+        """),
+        "dinhgia_style": JsCode("""
+        function(params) {
+            return {'color': '#D97706', 'fontWeight': 'bold'};
+        }
+        """)
+    }
+
 def parse_blk(blk_string):
     data = {"ten": "", "min_gia": 0, "max_gia": 0, "quan_phuong": {}, "min_ngang": 0, "min_pn": 0, "min_tang": 0, "min_dt": 0, "max_pm2": 0, "tags": []}
     if not blk_string or pd.isna(blk_string): return data
@@ -357,7 +510,97 @@ def update_vip_request_status(req_id: str, new_status: str, gc=None, sheet_id=No
 # 3. GIAO DIỆN CLIENT PORTAL DÀNH CHO KHÁCH VIP
 # ==============================================================================
 
-def render_vip_portal(df_houses: pd.DataFrame, df_kids: pd.DataFrame, gc=None, sheet_id=None, filter_houses_func=None):
+def build_vip_display_df(res_houses, selected_uids, revealed_uids):
+    """Chuẩn bị bảng dữ liệu hiển thị chuẩn cho Khách VIP: bảo mật thông tin nội bộ"""
+    df = res_houses.copy()
+
+    def get_real_col(key):
+        for c in df.columns:
+            if str(c).strip().lower() == str(key).strip().lower():
+                return c
+        return key
+
+    c_uid = get_real_col('uid')
+    c_sonha = get_real_col('sonha')
+    c_tenduong = get_real_col('tenduong')
+    c_quan = get_real_col('quan')
+    c_phuong = get_real_col('phuong')
+    c_ngang = get_real_col('ngang')
+    c_dai = get_real_col('dai')
+    c_gia = get_real_col('gia')
+    c_dt = get_real_col('dientich')
+    c_pm2 = get_real_col('p/m2')
+    c_ketcau = get_real_col('ketcau')
+    c_pl = get_real_col('PL')
+    c_mota = get_real_col('motachitiet')
+    c_q = get_real_col('dinhgia')
+    c_link_ggd = get_real_col('URL_GGD')
+
+    # Bổ sung cột còn thiếu nếu có
+    for col in [c_uid, c_sonha, c_tenduong, c_quan, c_phuong, c_ngang, c_dai, c_gia, c_dt, c_pm2, c_ketcau, c_pl, c_mota, c_q, c_link_ggd]:
+        if col not in df.columns:
+            df[col] = ""
+
+    # Tính định giá tham khảo
+    df = apply_dinh_gia(df, c_mota, c_dt, c_q)
+
+    # Làm sạch số liệu tính toán
+    for nc in [c_ngang, c_dai, c_gia, c_dt, c_pm2]:
+        df[nc] = clean_numeric(df[nc])
+
+    # Trích xuất đặc điểm và ghi chú riêng
+    df['Đặc điểm'] = df[c_mota].apply(extract_highlight)
+    df['📝 Ghi chú'] = df[c_mota].apply(extract_note)
+
+    # Sắp xếp ưu tiên: TAR (1) -> A (2) -> B (3) -> khác (4)
+    if c_pl in df.columns:
+        df['_rank_pl'] = df[c_pl].astype(str).str.strip().str.upper().apply(
+            lambda x: 1 if x == 'TAR' else (2 if x == 'A' else (3 if x == 'B' else 4))
+        )
+        df = df.sort_values(by='_rank_pl', ascending=True)
+
+    # 1. Cột ⭐ Quan tâm
+    df['_uid'] = df[c_uid].astype(str).str.strip()
+    df['⭐'] = df['_uid'].apply(
+        lambda u: '✅ Đã chọn' if u in selected_uids else '⭐ Chọn'
+    )
+
+    # 2. Cột Số nhà: nếu đã mở thì hiện thật, nếu chưa thì che ***
+    df['_real_sonha'] = df[c_sonha].astype(str).str.strip().replace('nan', '')
+    df['Số nhà'] = df.apply(
+        lambda r: r['_real_sonha'] if r['_uid'] in revealed_uids else '👁️ ***',
+        axis=1
+    )
+
+    # 3. Cột Ảnh: icon 📂 nếu có link http
+    df['_link_ggd'] = df[c_link_ggd].astype(str).str.strip()
+    df['Ảnh'] = df['_link_ggd'].apply(lambda x: '📂' if str(x).startswith('http') else '📁')
+
+    # Chuẩn hóa tên đường, phường, quận, PL
+    df['Phường'] = df[c_phuong].astype(str).str.strip().str.replace(r'\.0$', '', regex=True).replace('nan', '')
+    df['Quận'] = df[c_quan].astype(str).str.strip().str.title().replace('Nan', '')
+    df['Tên đường'] = df[c_tenduong].astype(str).str.strip().replace('nan', '')
+    df['PL'] = df[c_pl].astype(str).str.strip().replace('nan', '')
+    df['Ngang'] = df[c_ngang]
+    df['Dài'] = df[c_dai]
+    df['Diện tích'] = df[c_dt]
+    df['Giá'] = df[c_gia]
+    df['Giá m²'] = df[c_pm2]
+    df['Kết cấu'] = df[c_ketcau].astype(str).str.strip().replace('nan', '')
+
+    df['_reveal_trigger'] = ''
+    df['_link_trigger'] = ''
+
+    cols = [
+        '⭐', 'PL', 'Số nhà', 'Ảnh', 'Tên đường', 'Phường', 'Quận',
+        'Ngang', 'Dài', 'Diện tích', 'Giá', 'Định giá', 'Giá m²', 'Kết cấu',
+        'Đặc điểm', '📝 Ghi chú',
+        '_uid', '_real_sonha', '_link_ggd', '_reveal_trigger', '_link_trigger'
+    ]
+    return df[cols].copy()
+
+
+def render_vip_portal(df_houses: pd.DataFrame, df_kids: pd.DataFrame, gc=None, sheet_id=None, filter_houses_func=None, pull_houses_func=None):
     """Vẽ toàn bộ giao diện chuyên biệt cho Khách hàng VIP"""
     vip_info = st.session_state.get('vip_info', {})
     kid = vip_info.get('kid', 'VIP')
@@ -483,84 +726,165 @@ def render_vip_portal(df_houses: pd.DataFrame, df_kids: pd.DataFrame, gc=None, s
         else:
             res_houses = df_h.copy()
 
-        st.markdown(f"#### 🔎 Tìm thấy **{len(res_houses)}** căn nhà phù hợp với tiêu chuẩn VIP")
+        head_col1, head_col2 = st.columns([3.5, 1.5])
+        with head_col1:
+            st.markdown(f"#### 🔎 Tìm thấy **{len(res_houses)}** căn nhà phù hợp với tiêu chuẩn VIP")
+        with head_col2:
+            if st.button("🔄 Làm mới kho nhà", use_container_width=True, help="Tải lại dữ liệu mới nhất từ Google Sheets (GSK)"):
+                if pull_houses_func:
+                    with st.spinner("Đang tải lại kho nhà mới nhất..."):
+                        try:
+                            pull_houses_func()
+                            st.cache_data.clear()
+                            st.session_state['vip_grid_refresh'] = st.session_state.get('vip_grid_refresh', 0) + 1
+                            st.toast("✅ Đã cập nhật kho nhà mới nhất thành công!")
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"Lỗi làm mới: {e}")
 
         if res_houses.empty:
             st.info("💡 Không tìm thấy căn nào phù hợp hoàn toàn. Quý khách hãy thử mở rộng mức giá hoặc khu vực tìm kiếm.")
         else:
-            # Hiển thị dạng danh sách thẻ chi tiết trực quan
-            for idx, (_, row) in enumerate(res_houses.head(30).iterrows()):
-                uid = str(row.get('uid', ''))
-                sonha = str(row.get('sonha', '')).strip()
-                tenduong = str(row.get('tenduong', '')).strip()
-                quan = str(row.get('quan', '')).strip()
-                phuong = str(row.get('phuong', '')).strip().replace('.0', '')
-                gia = str(row.get('gia', '')).strip()
-                pm2 = str(row.get('p/m2', '')).strip()
-                dientich = str(row.get('dientich', '')).strip()
-                ngang = str(row.get('ngang', '')).strip()
-                dai = str(row.get('dai', '')).strip()
-                ketcau = str(row.get('ketcau', '')).strip()
-                mota = str(row.get('motachitiet', '')).strip()
-                link_ggd = str(row.get('URL_GGD', '')).strip()
-                link_qh = str(row.get('URL_Quy_Hoach', '')).strip()
+            # Chuẩn bị dữ liệu hiển thị dạng bảng (bảo mật, không có motachitiet, có Định giá, PL, Đặc điểm, Ghi chú)
+            df_display = build_vip_display_df(
+                res_houses,
+                st.session_state.get('vip_selected_uids', []),
+                st.session_state.get('vip_revealed_uids', set())
+            )
 
-                is_revealed = uid in st.session_state['vip_revealed_uids']
-                is_selected = uid in st.session_state['vip_selected_uids']
+            if AgGrid is not None:
+                vip_js = get_vip_aggrid_js()
+                gb = GridOptionsBuilder.from_dataframe(df_display)
+                gb.configure_default_column(filter=True, sortable=True, resizable=True, suppressSizeToFit=True)
 
-                # Địa chỉ hiển thị: Nếu đã bấm mở -> hiện số nhà thật, nếu chưa -> ẩn
-                display_address = f"**{sonha} {tenduong}**, Phường {phuong}, {quan}" if is_revealed else f"*** {tenduong}, Phường {phuong}, {quan}"
+                # 1. Cột ⭐ Quan tâm
+                gb.configure_column('⭐', header_name="⭐", pinned='left', width=75, minWidth=70, maxWidth=85,
+                                    onCellClicked=vip_js["quantam_click"], editable=False,
+                                    cellStyle={'cursor': 'pointer', 'textAlign': 'center', 'fontWeight': 'bold'})
 
-                with st.container(border=True):
-                    card_c1, card_c2, card_c3 = st.columns([3, 1.2, 1])
+                # 2. Cột PL
+                gb.configure_column('PL', width=50, minWidth=42, maxWidth=60,
+                                    cellStyle={'textAlign': 'center', 'fontWeight': 'bold', 'color': '#fbbf24'})
 
-                    with card_c1:
-                        st.markdown(f"### 🏠 {display_address}")
-                        st.markdown(f"💰 **Giá: `{gia} Tỷ`** | Giá m²: `{pm2} Tr/m²` | DT: **{dientich} m²** (Ngang {ngang}m x Dài {dai}m) | Kết cấu: **{ketcau}**")
-                        if mota and mota.lower() != 'nan':
-                            st.caption(f"📝 {mota[:200]}..." if len(mota) > 200 else f"📝 {mota}")
+                # 3. Cột Số nhà
+                gb.configure_column('Số nhà', width=95, minWidth=85, maxWidth=120,
+                                    onCellClicked=vip_js["sonha_click"],
+                                    cellStyle=vip_js["sonha_style"])
 
-                    with card_c2:
-                        # 1. NÚT HIỆN SỐ NHÀ KÈM TRACKING
-                        if not is_revealed:
-                            if st.button("👁️ Mở số nhà", key=f"rev_{idx}_{uid}", use_container_width=True, help="Bấm để xem số nhà chính xác"):
-                                st.session_state['vip_revealed_uids'].add(uid)
-                                # TRACKING HÀNH VI
+                # 4. Cột Ảnh
+                gb.configure_column('Ảnh', header_name="Ảnh", width=45, minWidth=40, maxWidth=55,
+                                    onCellClicked=vip_js["open_ggd_click"],
+                                    cellStyle=vip_js["ggd_style"])
+
+                # 5. Cột Tên đường
+                gb.configure_column('Tên đường', width=130, minWidth=100, maxWidth=180,
+                                    cellStyle={'color': '#38bdf8', 'fontWeight': 'bold'})
+
+                # 6. Phường, Quận
+                gb.configure_column('Phường', width=65, minWidth=50, maxWidth=85)
+                gb.configure_column('Quận', width=80, minWidth=65, maxWidth=110)
+
+                # 7. Kích thước & Diện tích
+                gb.configure_column('Ngang', type=["numericColumn"], width=55, minWidth=45, maxWidth=70)
+                gb.configure_column('Dài', type=["numericColumn"], width=55, minWidth=45, maxWidth=70)
+                gb.configure_column('Diện tích', header_name="DT (m²)", type=["numericColumn"], width=65, minWidth=55, maxWidth=80)
+
+                # 8. Giá & Định giá
+                gb.configure_column('Giá', header_name="Giá (Tỷ)", type=["numericColumn"], width=70, minWidth=60, maxWidth=90,
+                                    cellStyle=vip_js["gia_sale_style"])
+                gb.configure_column('Định giá', header_name="Định giá", type=["numericColumn"], width=70, minWidth=60, maxWidth=90,
+                                    cellStyle=vip_js["dinhgia_style"])
+                gb.configure_column('Giá m²', header_name="Giá m²", type=["numericColumn"], width=65, minWidth=55, maxWidth=80)
+
+                # 9. Kết cấu, Đặc điểm, Ghi chú
+                gb.configure_column('Kết cấu', width=65, minWidth=55, maxWidth=90)
+                gb.configure_column('Đặc điểm', width=220, minWidth=150, maxWidth=350)
+                gb.configure_column('📝 Ghi chú', width=450, minWidth=250, resizable=True,
+                                    cellStyle={'color': '#f59e0b', 'fontWeight': '500'})
+
+                # 10. Ẩn các cột kỹ thuật
+                gb.configure_column('_uid', hide=True)
+                gb.configure_column('_real_sonha', hide=True)
+                gb.configure_column('_link_ggd', hide=True)
+                gb.configure_column('_reveal_trigger', hide=True)
+                gb.configure_column('_link_trigger', hide=True)
+
+                refresh_count = st.session_state.get('vip_grid_refresh', 0)
+                ag_response = AgGrid(
+                    df_display,
+                    gridOptions=gb.build(),
+                    allow_unsafe_jscode=True,
+                    update_mode=GridUpdateMode.VALUE_CHANGED,
+                    data_return_mode=DataReturnMode.FILTERED_AND_SORTED,
+                    fit_columns_on_grid_load=False,
+                    theme='streamlit',
+                    height=550,
+                    key=f"vip_grid_{kid}_{len(df_display)}_{refresh_count}"
+                )
+
+                if ag_response and ag_response['data'] is not None:
+                    df_res = pd.DataFrame(ag_response['data'])
+
+                    # A. Đồng bộ giỏ hàng
+                    if '⭐' in df_res.columns and '_uid' in df_res.columns:
+                        chosen = set(df_res[df_res['⭐'] == '✅ Đã chọn']['_uid'].astype(str).str.strip().tolist())
+                        unchosen = set(df_res[df_res['⭐'] == '⭐ Chọn']['_uid'].astype(str).str.strip().tolist())
+
+                        curr_selected = set(st.session_state.get('vip_selected_uids', []))
+                        curr_selected.update(chosen)
+                        curr_selected.difference_update(unchosen)
+                        new_sel_list = [u for u in curr_selected if u]
+                        if new_sel_list != st.session_state['vip_selected_uids']:
+                            st.session_state['vip_selected_uids'] = new_sel_list
+
+                    # B. Trigger mở số nhà
+                    if '_reveal_trigger' in df_res.columns:
+                        rev_triggered = df_res[df_res['_reveal_trigger'].astype(str).str.strip() != '']
+                        for _, t_row in rev_triggered.iterrows():
+                            t_uid = str(t_row['_uid']).strip()
+                            if t_uid and t_uid not in st.session_state['vip_revealed_uids']:
+                                st.session_state['vip_revealed_uids'].add(t_uid)
                                 record_vip_action(
-                                    kid=kid, ten_khach=ten_khach, uid=uid, sonha=sonha,
-                                    tenduong=tenduong, quan_phuong=f"{phuong}, {quan}",
-                                    gia=gia, hanh_dong="XEM_SO_NHA", chi_tiet=f"Số nhà: {sonha}",
+                                    kid=kid, ten_khach=ten_khach, uid=t_uid,
+                                    sonha=str(t_row.get('_real_sonha', '')),
+                                    tenduong=str(t_row.get('Tên đường', '')),
+                                    quan_phuong=f"{t_row.get('Phường', '')}, {t_row.get('Quận', '')}",
+                                    gia=str(t_row.get('Giá', '')),
+                                    hanh_dong="XEM_SO_NHA",
+                                    chi_tiet=f"Mở số nhà: {t_row.get('_real_sonha', '')}",
                                     gc=gc, sheet_id=sheet_id
                                 )
-                                st.toast(f"✅ Đã mở địa chỉ: {sonha} {tenduong}!", icon="📍")
+                                st.toast(f"📍 Đã mở địa chỉ: {t_row.get('_real_sonha', '')} {t_row.get('Tên đường', '')}!")
                                 st.rerun()
-                        else:
-                            st.success(f"📍 Số nhà: **{sonha}**")
 
-                        # 2. LINK ẢNH / GGD KÈM TRACKING
-                        if link_ggd and link_ggd.startswith('http'):
-                            st.link_button("📸 Xem link ảnh/GGD", link_ggd, use_container_width=True)
-                            # Record tracking khi link tồn tại
-                            # Note: click được ghi khi khách mở chi tiết
-
-                    with card_c3:
-                        # Nút thêm vào danh sách quan tâm
-                        if not is_selected:
-                            if st.button("⭐ Quan tâm", key=f"sel_{idx}_{uid}", use_container_width=True, type="secondary"):
-                                st.session_state['vip_selected_uids'].append(uid)
+                    # C. Trigger mở link ảnh
+                    if '_link_trigger' in df_res.columns:
+                        link_trig = df_res[df_res['_link_trigger'].astype(str).str.strip() != '']
+                        for _, l_row in link_trig.iterrows():
+                            l_uid = str(l_row['_uid']).strip()
+                            if l_uid:
                                 record_vip_action(
-                                    kid=kid, ten_khach=ten_khach, uid=uid, sonha=sonha,
-                                    tenduong=tenduong, quan_phuong=f"{phuong}, {quan}",
-                                    gia=gia, hanh_dong="CHON_QUAN_TAM", chi_tiet="Thêm vào danh sách",
+                                    kid=kid, ten_khach=ten_khach, uid=l_uid,
+                                    sonha=str(l_row.get('_real_sonha', '')),
+                                    tenduong=str(l_row.get('Tên đường', '')),
+                                    quan_phuong=f"{l_row.get('Phường', '')}, {l_row.get('Quận', '')}",
+                                    gia=str(l_row.get('Giá', '')),
+                                    hanh_dong="XEM_LINK_ANH",
+                                    chi_tiet=f"Mở album ảnh: {l_row.get('_link_ggd', '')}",
                                     gc=gc, sheet_id=sheet_id
                                 )
-                                st.toast("⭐ Đã thêm vào danh sách quan tâm!")
-                                st.rerun()
-                        else:
-                            if st.button("✅ Đã chọn", key=f"unsel_{idx}_{uid}", use_container_width=True, type="primary"):
-                                st.session_state['vip_selected_uids'].remove(uid)
-                                st.toast("Đã bỏ chọn căn này.")
-                                st.rerun()
+            else:
+                st.dataframe(df_display.drop(columns=['_uid', '_real_sonha', '_link_ggd', '_reveal_trigger', '_link_trigger'], errors='ignore'), use_container_width=True)
+
+            st.caption("💡 **Hướng dẫn**: Click cột **`⭐`** để chọn/bỏ chọn căn quan tâm • Click ô **`👁️ ***`** ở cột Số nhà để mở địa chỉ chính xác • Click **`📂`** để mở album ảnh.")
+
+            st.markdown("---")
+            col_bar1, col_bar2 = st.columns([3.5, 1.5])
+            with col_bar1:
+                st.markdown(f"### ⭐ Quý khách đang chọn: **{len(st.session_state['vip_selected_uids'])}** căn")
+            with col_bar2:
+                if st.session_state['vip_selected_uids']:
+                    st.info("👉 Hãy chuyển sang tab **'⭐ Danh Sách Quan Tâm'** để gửi yêu cầu sổ và tư vấn sâu!")
 
     # --- TAB 2: DANH SÁCH QUAN TÂM & GỬI YÊU CẦU SỔ ---
     with tab_selected:
