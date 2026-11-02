@@ -9,7 +9,7 @@ from threading import RLock
 import pandas as pd
 
 
-CUSTOMER_COLUMNS = ['KID', 'PLK', 'thongtin_KID', 'ghi_chu', 'bo_loc_KID', 'ngay_tuong_tac']
+CUSTOMER_COLUMNS = ['KID', 'PLK', 'thongtin_KID', 'sdt', 'ghi_chu', 'bo_loc_KID', 'ngay_tuong_tac']
 _customer_lock = RLock()
 
 

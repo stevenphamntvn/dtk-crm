@@ -13,6 +13,17 @@ import tempfile
 import platform
 import hashlib
 from customer_data import append_customer, next_customer_id, read_customers
+from vip_portal import (
+    authenticate_vip_customer,
+    extract_customer_phone,
+    normalize_kid,
+    render_vip_portal,
+    render_admin_vip_tab,
+    load_vip_requests,
+    load_vip_tracking,
+    record_vip_action,
+    submit_vip_request
+)
 from sync_report import build_sync_report, style_sync_report
 
 from st_aggrid import AgGrid, GridOptionsBuilder, JsCode
@@ -959,8 +970,14 @@ def parse_blk(blk_string):
             
     return data
 
-def build_blk(ten_khach, min_gia, max_gia, dict_qp_codes, min_ngang, min_pn, min_tang, min_dt, max_pm2, tags):
+def build_blk(ten_khach, min_gia, max_gia, dict_qp_codes, min_ngang, min_pn, min_tang, min_dt, max_pm2=0.0, tags=None):
     """Đóng gói chuỗi Protocol chuẩn (Có thêm Tầng và Giá m²)"""
+    if tags is None:
+        if isinstance(max_pm2, list):
+            tags = max_pm2
+            max_pm2 = 0.0
+        else:
+            tags = []
     parts = [str(ten_khach)]
     parts.append(f"G{float(min_gia):g}-{float(max_gia):g}T")
 
@@ -1026,9 +1043,10 @@ def show_customer_needs(needs):
 def dialog_add_customer(needs, classifications):
     def prepare_review():
         name = st.session_state['new_customer_name'].strip()
+        sdt = st.session_state.get('new_customer_sdt', '').strip()
         classification = st.session_state['new_customer_classification']
         notes = st.session_state['new_customer_notes'].strip()
-        st.session_state['new_customer_fields'] = {'name': name, 'classification': classification, 'notes': notes}
+        st.session_state['new_customer_fields'] = {'name': name, 'sdt': sdt, 'classification': classification, 'notes': notes}
         st.session_state.pop('new_customer_error', None)
         if not name:
             st.session_state['new_customer_error'] = 'Vui lòng nhập tên khách hàng.'
@@ -1042,7 +1060,7 @@ def dialog_add_customer(needs, classifications):
             st.session_state['new_customer_error'] = f'Không đọc được danh sách khách local: {exc}'
             return
         st.session_state['new_customer_review'] = {
-            'KID': kid, 'PLK': classification, 'thongtin_KID': name,
+            'KID': kid, 'PLK': classification, 'thongtin_KID': name, 'sdt': sdt,
             'ghi_chu': notes, 'bo_loc_KID': build_blk(name, **needs), 'ngay_tuong_tac': '',
         }
 
@@ -1053,6 +1071,7 @@ def dialog_add_customer(needs, classifications):
         fields = st.session_state.get('new_customer_fields', {})
         with st.form('new_customer_form'):
             st.text_input('Tên khách hàng', value=fields.get('name', ''), max_chars=200, key='new_customer_name')
+            st.text_input('Số điện thoại (tạo mật khẩu VIP)', value=fields.get('sdt', ''), max_chars=15, key='new_customer_sdt', help='Khách VIP dùng 6 số cuối SĐT làm mật khẩu')
             st.selectbox('Phân loại', classifications, key='new_customer_classification',
                          index=classifications.index(fields.get('classification', 'A')))
             st.text_area('Ghi chú', value=fields.get('notes', ''), key='new_customer_notes')
@@ -1064,6 +1083,7 @@ def dialog_add_customer(needs, classifications):
     st.subheader('Kiểm tra thông tin khách hàng')
     st.write('**Mã khách:**', draft['KID'])
     st.write('**Tên khách:**', draft['thongtin_KID'])
+    st.write('**Số điện thoại (VIP):**', draft.get('sdt') or 'Chưa có')
     st.write('**Phân loại:**', draft['PLK'])
     st.write('**Ghi chú:**', draft['ghi_chu'] or 'Chưa có')
     show_customer_needs(needs)
@@ -2476,6 +2496,8 @@ def generate_auth_token(username, password):
 def check_authentication():
     """Bắt buộc đăng nhập khi chạy trên Cloud; tự động ghi nhớ phiên trên Tablet khi F5/reload"""
     if not IS_CLOUD:
+        if 'user_role' not in st.session_state:
+            st.session_state['user_role'] = 'admin'
         return True
 
     # 1. Đã xác thực trong session hiện tại
@@ -2487,10 +2509,8 @@ def check_authentication():
     try:
         if hasattr(st, "secrets"):
             if "users" in st.secrets:
-                # Hỗ trợ cấu hình dạng: [users] admin = "matkhau"
                 valid_users = {str(k).strip(): str(v).strip() for k, v in dict(st.secrets["users"]).items()}
             elif "APP_PASSWORD" in st.secrets:
-                # Hỗ trợ cấu hình dạng: APP_USERNAME = "admin", APP_PASSWORD = "..."
                 u = str(st.secrets.get("APP_USERNAME", "admin")).strip()
                 p = str(st.secrets.get("APP_PASSWORD", "")).strip()
                 if p:
@@ -2498,25 +2518,47 @@ def check_authentication():
     except Exception:
         pass
 
-    # Fallback tài khoản mặc định nếu chưa cấu hình trong secrets
     if not valid_users:
         valid_users = {"admin": "dtk@2025"}
 
-    # 2. Tự động phục hồi phiên đăng nhập từ URL Query Params (Giữ đăng nhập khi F5)
+    # 2. Tự động phục hồi phiên đăng nhập từ URL Query Params
     try:
         if hasattr(st, "query_params"):
             q_user = str(st.query_params.get("u", "")).strip()
             q_auth = str(st.query_params.get("auth", "")).strip()
-            if q_user and q_auth and q_user in valid_users:
-                expected_auth = generate_auth_token(q_user, valid_users[q_user])
-                if q_auth == expected_auth:
-                    st.session_state['authenticated'] = True
-                    st.session_state['logged_in_user'] = q_user
-                    return True
+            if q_user and q_auth:
+                if q_user in valid_users:
+                    expected_auth = generate_auth_token(q_user, valid_users[q_user])
+                    if q_auth == expected_auth:
+                        st.session_state['authenticated'] = True
+                        st.session_state['logged_in_user'] = q_user
+                        st.session_state['user_role'] = 'admin'
+                        return True
+                else:
+                    # Kiểm tra Khách VIP từ Query Params
+                    df_k_auth = safe_read(FILE_KID)
+                    kid_t = normalize_kid(q_user)
+                    matches = df_k_auth[df_k_auth['KID'].astype(str).str.strip().str.upper() == kid_t] if not df_k_auth.empty else pd.DataFrame()
+                    if not matches.empty:
+                        kid_r = matches.iloc[0]
+                        phone = extract_customer_phone(kid_r)
+                        pass_w = phone[-6:] if len(phone) >= 6 else "123456"
+                        expected_auth = generate_auth_token(q_user, pass_w)
+                        if q_auth == expected_auth:
+                            st.session_state['authenticated'] = True
+                            st.session_state['logged_in_user'] = str(kid_r.get('thongtin_KID', '')).split('.')[0]
+                            st.session_state['user_role'] = 'client_vip'
+                            st.session_state['vip_info'] = {
+                                "kid": str(kid_r['KID']).strip(),
+                                "name": str(kid_r.get('thongtin_KID', '')).split('.')[0],
+                                "phone": phone,
+                                "raw_row": kid_r.to_dict()
+                            }
+                            return True
     except Exception:
         pass
 
-    # 3. Tự động phục hồi phiên từ Browser LocalStorage (Giữ đăng nhập khi mở lại web/PWA)
+    # 3. Tự động phục hồi phiên từ Browser LocalStorage
     auto_restore_js = """
     <script>
     (function() {
@@ -2535,29 +2577,30 @@ def check_authentication():
     """
     st.markdown(auto_restore_js, unsafe_allow_html=True)
 
-    # 4. Giao diện Form Đăng Nhập
-    _, col_login, _ = st.columns([1, 1.3, 1])
+    # 4. Giao diện Form Đăng Nhập (Hỗ trợ cả Admin & Khách VIP)
+    _, col_login, _ = st.columns([1, 1.4, 1])
     with col_login:
         st.markdown("<br><br>", unsafe_allow_html=True)
         st.markdown("<h2 style='text-align: center;'>🔒 ĐĂNG NHẬP HỆ THỐNG</h2>", unsafe_allow_html=True)
-        st.markdown("<p style='text-align: center; color: #aaa;'>Đại Thế Kỷ Advisor CRM - Cloud Edition</p>", unsafe_allow_html=True)
+        st.markdown("<p style='text-align: center; color: #d4af37; font-weight: 500;'>Đại Thế Kỷ Advisor CRM & VIP Client Portal</p>", unsafe_allow_html=True)
         st.markdown("<br>", unsafe_allow_html=True)
 
         with st.form("cloud_login_form", clear_on_submit=False):
-            username_input = st.text_input("👤 Tên đăng nhập:", placeholder="Nhập tên tài khoản...").strip()
-            password_input = st.text_input("🔑 Mật khẩu:", type="password", placeholder="Nhập mật khẩu...").strip()
+            username_input = st.text_input("👤 Tên đăng nhập / Mã khách hàng:", placeholder="Admin nhập 'admin', Khách VIP nhập mã ví dụ: K053...").strip()
+            password_input = st.text_input("🔑 Mật khẩu:", type="password", placeholder="Admin nhập mật khẩu, Khách VIP nhập 6 số cuối SĐT...").strip()
             remember_me = st.checkbox("Ghi nhớ đăng nhập trên thiết bị này", value=True)
             
             st.markdown("<br>", unsafe_allow_html=True)
             submitted = st.form_submit_button("🚀 ĐĂNG NHẬP", use_container_width=True, type="primary")
 
             if submitted:
+                # A. Kiểm tra Admin
                 if username_input in valid_users and valid_users[username_input] == password_input:
                     auth_token = generate_auth_token(username_input, password_input)
                     st.session_state['authenticated'] = True
                     st.session_state['logged_in_user'] = username_input
+                    st.session_state['user_role'] = 'admin'
                     
-                    # Lưu vào Query Params
                     try:
                         if hasattr(st, "query_params"):
                             st.query_params["u"] = username_input
@@ -2565,7 +2608,6 @@ def check_authentication():
                     except Exception:
                         pass
                         
-                    # Lưu vào LocalStorage
                     if remember_me:
                         st.markdown(f"""
                         <script>
@@ -2576,18 +2618,55 @@ def check_authentication():
                         </script>
                         """, unsafe_allow_html=True)
                         
-                    st.toast(f"✅ Chào mừng {username_input} đã đăng nhập thành công!", icon="🎉")
+                    st.toast(f"✅ Chào mừng Admin {username_input} đã đăng nhập thành công!", icon="🎉")
                     st.rerun()
-                else:
-                    st.error("❌ Tên đăng nhập hoặc mật khẩu không chính xác!")
 
-    st.stop() # Dừng vẽ toàn bộ giao diện phía sau khi chưa đăng nhập
+                # B. Kiểm tra Khách VIP
+                else:
+                    df_k_auth = safe_read(FILE_KID)
+                    is_vip, vip_data, vip_err = authenticate_vip_customer(username_input, password_input, df_k_auth)
+                    if is_vip:
+                        auth_token = generate_auth_token(username_input, password_input)
+                        st.session_state['authenticated'] = True
+                        st.session_state['logged_in_user'] = vip_data.get('name', username_input)
+                        st.session_state['user_role'] = 'client_vip'
+                        st.session_state['vip_info'] = vip_data
+
+                        try:
+                            if hasattr(st, "query_params"):
+                                st.query_params["u"] = username_input
+                                st.query_params["auth"] = auth_token
+                        except Exception:
+                            pass
+
+                        if remember_me:
+                            st.markdown(f"""
+                            <script>
+                            try {{
+                                localStorage.setItem("dtk_crm_user", "{username_input}");
+                                localStorage.setItem("dtk_crm_token", "{auth_token}");
+                            }} catch(e) {{}}
+                            </script>
+                            """, unsafe_allow_html=True)
+
+                        st.toast(f"👑 Kính chào Quý khách VIP {vip_data.get('name')}!", icon="🎉")
+                        st.rerun()
+                    else:
+                        st.error(f"❌ {vip_err if 'Không tìm thấy' not in vip_err else 'Tên đăng nhập hoặc mật khẩu không chính xác!'}")
+
+    st.stop()
 
 # Kiểm tra quyền truy cập ngay đầu chu trình giao diện
 check_authentication()
 
+# Nếu là khách VIP -> Chuyển hướng sang VIP Client Portal
+if st.session_state.get('user_role') == 'client_vip':
+    df_houses_vip, df_kids_vip, _ = load_local_data()
+    render_vip_portal(df_houses_vip, df_kids_vip, gc=get_gspread_client(), sheet_id=SHEET_ID, filter_houses_func=filter_houses)
+    st.stop()
+
 # ==========================================
-# 4. GIAO DIỆN CHÍNH (MAIN UI APP)
+# 4. GIAO DIỆN CHÍNH (MAIN UI APP CHO ADMIN)
 # ==========================================
 
 st.title("CRM")
@@ -2620,6 +2699,25 @@ with st.sidebar:
                 st.rerun()
             except Exception as e:
                 st.error(f"Lỗi: {e}")
+
+    st.markdown("---")
+    with st.expander("👑 Xem Thử Giao Diện Khách VIP"):
+        st.caption("Admin có thể giả lập đăng nhập để kiểm tra giao diện & tính năng Khách VIP:")
+        df_k_sim = safe_read(FILE_KID)
+        if not df_k_sim.empty and 'KID' in df_k_sim.columns:
+            vip_kids_sim = df_k_sim['KID'].astype(str).tolist()
+            sim_kid = st.selectbox("Chọn Khách VIP:", vip_kids_sim, key="sim_vip_select")
+            if st.button("🚀 Vào Giao Diện VIP Của Khách Này", use_container_width=True):
+                r_m = df_k_sim[df_k_sim['KID'].astype(str) == sim_kid].iloc[0]
+                st.session_state['user_role'] = 'client_vip'
+                st.session_state['authenticated'] = True
+                st.session_state['vip_info'] = {
+                    "kid": sim_kid,
+                    "name": str(r_m.get('thongtin_KID', '')).split('.')[0],
+                    "phone": extract_customer_phone(r_m),
+                    "raw_row": r_m.to_dict()
+                }
+                st.rerun()
 
     # Nút Đăng xuất cho bản Cloud
     if IS_CLOUD and st.session_state.get('authenticated'):
@@ -2705,7 +2803,13 @@ def crm_main_interface():
         st.session_state['app_mode'] = 'GUI_KHACH'
     is_tim_mode = st.session_state['app_mode'] == 'TIM_KHACH'
 
-    tab1, tab2, tab3 = st.tabs(["🎯 Khớp Nhu Cầu", "👥 Danh Sách MyKID", "📝 Nhật Ký Zalo (Dashboard)"])
+    df_v_reqs = load_vip_requests()
+    new_vip_count = len(df_v_reqs[df_v_reqs['trang_thai'] == 'Mới']) if not df_v_reqs.empty else 0
+    if new_vip_count > 0:
+        st.warning(f"🔔 **CÓ {new_vip_count} YÊU CẦU SỔ MỚI TỪ KHÁCH VIP!** Hãy chuyển sang tab **👑 Khách VIP** để xem chi tiết và phản hồi.")
+
+    vip_tab_title = f"👑 Khách VIP ({new_vip_count} mới)" if new_vip_count > 0 else "👑 Khách VIP"
+    tab1, tab2, tab3, tab4 = st.tabs(["🎯 Khớp Nhu Cầu", "👥 Danh Sách MyKID", "📝 Nhật Ký Zalo (Dashboard)", vip_tab_title])
 
     with tab1:
         st.header("🎯 Gợi ý nhà phù hợp cho khách" if not is_tim_mode else "🎯 Chọn Siêu Phẩm (Tìm Khách)")
@@ -3469,6 +3573,9 @@ def crm_main_interface():
         else:
             df_display_t3 = prepare_tab3_data(df_log, df_houses)
             render_tab3_ui(df_display_t3)
+
+    with tab4:
+        render_admin_vip_tab(df_houses, df_kids, gc=get_gspread_client(), sheet_id=SHEET_ID)
 
 # ==========================================
 # PWA OFFLINE SYNC HANDLERS
