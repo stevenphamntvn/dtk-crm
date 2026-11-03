@@ -14,6 +14,9 @@ from Data.vip_portal import (
     submit_vip_request,
     load_vip_requests,
     update_vip_request_status,
+    extract_highlight,
+    explain_tags,
+    build_vip_display_df,
 )
 
 
@@ -142,6 +145,68 @@ class TestVipPortal(unittest.TestCase):
         ok, info, err = authenticate_vip_customer("K053", "000000", df_kids_empty)
         self.assertFalse(ok)
         self.assertIn("Mật khẩu không đúng", err)
+
+    def test_extract_and_explain_tags(self):
+        desc = "CVI DAD 2MT TMA CHV6 PN4 N(Gặp trực tiếp chủ nhà)"
+        tags = extract_highlight(desc)
+        self.assertIn("CVI", tags)
+        self.assertIn("DAD", tags)
+        self.assertIn("2MT", tags)
+        self.assertIn("TMA", tags)
+        self.assertIn("CHV6", tags)
+        self.assertIn("PN4", tags)
+
+        explained = explain_tags(tags)
+        self.assertIn("Mặt tiền công viên", explained)
+        self.assertIn("đâm đường", explained)
+        self.assertIn("thang máy", explained)
+        self.assertIn("Căn hộ dịch vụ 6P", explained)
+        self.assertIn("4 Phòng ngủ", explained)
+
+    def test_build_vip_display_df(self):
+        df_dummy = pd.DataFrame([{
+            'uid': '1001',
+            'sonha': '123/45',
+            'tenduong': 'Lê Quang Định',
+            'quan': 'Bình Thạnh',
+            'phuong': '14',
+            'ngang': '4.2',
+            'dai': '15',
+            'dientich': '63',
+            'gia': '8.5',
+            'p/m2': '135',
+            'ketcau': '4T',
+            'PL': 'TAR',
+            'motachitiet': 'CVI TMA N(Bán gấp) SCN63',
+            'dinhgia': '9.0',
+            'URL_GGD': 'https://drive.google.com/drive/folders/test1234',
+            'cus': 'NỘI BỘ BROKER',
+        }])
+
+        df_disp = build_vip_display_df(df_dummy, selected_uids=['1001'], revealed_uids=set())
+
+        expected_cols = [
+            '⭐', 'PL', 'Số nhà', 'Ảnh', 'Đường', 'P.', 'Q.',
+            'Ngang', 'Dài', 'DT', 'Giá', 'Đ.Giá', 'Tr/m²', 'K.Cấu',
+            'Đ.Điểm', 'G.Chú',
+            '_uid', '_real_sonha', '_link_ggd', '_reveal_trigger', '_link_trigger', '_dacdiem_tooltip'
+        ]
+        self.assertEqual(list(df_disp.columns), expected_cols)
+
+        # Bảo mật: không chứa motachitiet hoặc cus
+        self.assertNotIn('motachitiet', df_disp.columns)
+        self.assertNotIn('cus', df_disp.columns)
+
+        # Kiểm tra dữ liệu
+        row = df_disp.iloc[0]
+        self.assertEqual(row['⭐'], '✅ Đã chọn')
+        self.assertEqual(row['Số nhà'], '👁️ ***')
+        self.assertEqual(row['PL'], 'TAR')
+        self.assertEqual(row['Ảnh'], '📂')
+        self.assertEqual(row['Đường'], 'Lê Quang Định')
+        self.assertIn('CVI', row['Đ.Điểm'])
+        self.assertEqual(row['G.Chú'], 'Bán gấp')
+        self.assertIn('công viên', row['_dacdiem_tooltip'])
 
 
 if __name__ == '__main__':

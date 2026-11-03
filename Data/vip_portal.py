@@ -58,23 +58,82 @@ def clean_numeric(series):
     ).fillna(0.0)
 
 
+TAG_DICTIONARY = {
+    "2MT": "Nhà 2 mặt tiền",
+    "CGO": "Lô góc 2 mặt tiền VIP",
+    "P1C": "Phía tay phải đường 1 chiều",
+    "T1C": "Phía tay trái đường 1 chiều",
+    "DAD": "Nhà bị đâm đường (lỗi phong thủy)",
+    "HXT": "Hẻm xe tải",
+    "HXH": "Hẻm xe hơi",
+    "HBG": "Hẻm ba gác",
+    "MAT": "Nhà mặt tiền",
+    "MT": "Nhà mặt tiền",
+    "CVI": "Mặt tiền công viên VIP (sát/view công viên)",
+    "GCV": "Gần công viên",
+    "MTR": "Gần nhà ga Metro",
+    "GAC": "Gần Chùa",
+    "GCH": "Gần Chợ",
+    "NOH": "Nở hậu",
+    "TOH": "Tóp hậu (lỗi phong thủy)",
+    "SA4": "Sổ vuông vức như A4",
+    "QHH": "Dính quy hoạch hỗn hợp",
+    "TTT": "Tây Tứ Trạch (hợp Tây tứ mệnh)",
+    "DTT": "Đông Tứ Trạch (hợp Đông tứ mệnh)",
+    "KLP": "Không lỗi phong thủy",
+    "TMA": "Nhà có thang máy",
+    "NTC": "Nội thất cao cấp / mới đẹp ở ngay",
+    "VLA": "Biệt thự (Villa)",
+    "VPH": "Tòa nhà văn phòng",
+    "KSA": "Khách sạn",
+    "C4": "Nhà cấp 4"
+}
+
+
+def explain_tags(tag_str):
+    """Tạo chú giải chi tiết khi rê chuột vào ô đặc điểm"""
+    if not tag_str or pd.isna(tag_str):
+        return ""
+    tags = [t.strip() for t in str(tag_str).split(',') if t.strip()]
+    explanations = []
+    for t in tags:
+        if t in TAG_DICTIONARY:
+            explanations.append(f"{t}: {TAG_DICTIONARY[t]}")
+        elif t.startswith("PN"):
+            explanations.append(f"{t}: {t[2:]} Phòng ngủ")
+        elif t.startswith("DTN"):
+            explanations.append(f"{t}: Đường trước nhà {t[3:]}m")
+        elif t.startswith("QH"):
+            explanations.append(f"{t}: Quy hoạch đường {t[2:]}m")
+        elif t.startswith("SCN"):
+            explanations.append(f"{t}: Sổ công nhận {t[3:]}m²")
+        elif t.startswith("SLG"):
+            explanations.append(f"{t}: Sau lộ giới {t[3:]}m²")
+        elif t.startswith("CHV"):
+            explanations.append(f"{t}: Căn hộ dịch vụ {t[3:]}P")
+        else:
+            explanations.append(t)
+    return " | ".join(explanations)
+
+
 def extract_highlight(text):
-    """Trích xuất các đặc điểm quan trọng từ mô tả chi tiết"""
+    """Trích xuất các đặc điểm quan trọng từ mô tả chi tiết chuẩn theo code_list"""
     if not text or pd.isna(text):
         return ""
     t_upper = str(text).upper()
     found = []
     tags = [
-        "TOH", "2MT", "CGO", "P1C", "T1C", "GAC", "GCH", "DAD", "NTC", "SA4",
-        "NOH", "MTR", "QHH", "TTT", "DTT", "CVI", "GCV", "VLA", "VPH", "TMA",
-        "MAT", "HXT", "HXH", "HBG", "KLP"
+        "CVI", "GCV", "DAD", "2MT", "CGO", "P1C", "T1C", "HXT", "HXH", "HBG",
+        "MAT", "MT", "MTR", "SA4", "NOH", "TOH", "GAC", "GCH", "QHH", "TTT",
+        "DTT", "KLP", "TMA", "NTC", "VLA", "VPH", "KSA", "C4"
     ]
     for t in tags:
         if t in t_upper and t not in found:
             found.append(t)
-    dynamic_matches = re.findall(r'\b(PN|SCN|SLG|QH|DTN)\s*(\d+)\b', t_upper)
+    dynamic_matches = re.findall(r'\b(PN|SCN|SLG|QH|DTN|CHV)\s*([0-9.,]+)\b', t_upper)
     for prefix, num in dynamic_matches:
-        tag = f"{prefix}{num}"
+        num_clean = str(num).replace(',', '.')
+        tag = f"{prefix}{num_clean}"
         if tag not in found:
             found.append(tag)
     return ", ".join(found)
@@ -176,9 +235,10 @@ def get_vip_aggrid_js():
         """),
         "gia_sale_style": JsCode("""
         function(params) {
-            if (params.value && params.data['Định giá']) {
+            const dinhGiaVal = params.data['Đ.Giá'] || params.data['Định giá'];
+            if (params.value && dinhGiaVal) {
                 const gia = parseFloat(params.value);
-                const dinhGia = parseFloat(params.data['Định giá']);
+                const dinhGia = parseFloat(dinhGiaVal);
                 if (!isNaN(gia) && !isNaN(dinhGia) && gia < dinhGia) {
                     return {'color': '#10B981', 'fontWeight': 'bold'};
                 }
@@ -549,8 +609,9 @@ def build_vip_display_df(res_houses, selected_uids, revealed_uids):
         df[nc] = clean_numeric(df[nc])
 
     # Trích xuất đặc điểm và ghi chú riêng
-    df['Đặc điểm'] = df[c_mota].apply(extract_highlight)
-    df['📝 Ghi chú'] = df[c_mota].apply(extract_note)
+    df['Đ.Điểm'] = df[c_mota].apply(extract_highlight)
+    df['_dacdiem_tooltip'] = df['Đ.Điểm'].apply(explain_tags)
+    df['G.Chú'] = df[c_mota].apply(extract_note)
 
     # Sắp xếp ưu tiên: TAR (1) -> A (2) -> B (3) -> khác (4)
     if c_pl in df.columns:
@@ -576,26 +637,27 @@ def build_vip_display_df(res_houses, selected_uids, revealed_uids):
     df['_link_ggd'] = df[c_link_ggd].astype(str).str.strip()
     df['Ảnh'] = df['_link_ggd'].apply(lambda x: '📂' if str(x).startswith('http') else '📁')
 
-    # Chuẩn hóa tên đường, phường, quận, PL
-    df['Phường'] = df[c_phuong].astype(str).str.strip().str.replace(r'\.0$', '', regex=True).replace('nan', '')
-    df['Quận'] = df[c_quan].astype(str).str.strip().str.title().replace('Nan', '')
-    df['Tên đường'] = df[c_tenduong].astype(str).str.strip().replace('nan', '')
+    # Chuẩn hóa tên đường, phường, quận, PL (tên cột ngắn gọn)
+    df['Đường'] = df[c_tenduong].astype(str).str.strip().replace('nan', '')
+    df['P.'] = df[c_phuong].astype(str).str.strip().str.replace(r'\.0$', '', regex=True).replace('nan', '')
+    df['Q.'] = df[c_quan].astype(str).str.strip().str.title().replace('Nan', '')
     df['PL'] = df[c_pl].astype(str).str.strip().replace('nan', '')
     df['Ngang'] = df[c_ngang]
     df['Dài'] = df[c_dai]
-    df['Diện tích'] = df[c_dt]
+    df['DT'] = df[c_dt]
     df['Giá'] = df[c_gia]
-    df['Giá m²'] = df[c_pm2]
-    df['Kết cấu'] = df[c_ketcau].astype(str).str.strip().replace('nan', '')
+    df['Đ.Giá'] = df['Định giá']
+    df['Tr/m²'] = df[c_pm2]
+    df['K.Cấu'] = df[c_ketcau].astype(str).str.strip().replace('nan', '')
 
     df['_reveal_trigger'] = ''
     df['_link_trigger'] = ''
 
     cols = [
-        '⭐', 'PL', 'Số nhà', 'Ảnh', 'Tên đường', 'Phường', 'Quận',
-        'Ngang', 'Dài', 'Diện tích', 'Giá', 'Định giá', 'Giá m²', 'Kết cấu',
-        'Đặc điểm', '📝 Ghi chú',
-        '_uid', '_real_sonha', '_link_ggd', '_reveal_trigger', '_link_trigger'
+        '⭐', 'PL', 'Số nhà', 'Ảnh', 'Đường', 'P.', 'Q.',
+        'Ngang', 'Dài', 'DT', 'Giá', 'Đ.Giá', 'Tr/m²', 'K.Cấu',
+        'Đ.Điểm', 'G.Chú',
+        '_uid', '_real_sonha', '_link_ggd', '_reveal_trigger', '_link_trigger', '_dacdiem_tooltip'
     ]
     return df[cols].copy()
 
@@ -756,50 +818,68 @@ def render_vip_portal(df_houses: pd.DataFrame, df_kids: pd.DataFrame, gc=None, s
                 vip_js = get_vip_aggrid_js()
                 gb = GridOptionsBuilder.from_dataframe(df_display)
                 gb.configure_default_column(filter=True, sortable=True, resizable=True, suppressSizeToFit=True)
+                gb.configure_grid_options(tooltipShowDelay=100)
 
                 # 1. Cột ⭐ Quan tâm
-                gb.configure_column('⭐', header_name="⭐", pinned='left', width=75, minWidth=70, maxWidth=85,
+                gb.configure_column('⭐', header_name="⭐", pinned='left', width=65, minWidth=60, maxWidth=75,
+                                    headerTooltip="Bấm để chọn/bỏ chọn căn quan tâm gửi Cố vấn xin sổ",
                                     onCellClicked=vip_js["quantam_click"], editable=False,
                                     cellStyle={'cursor': 'pointer', 'textAlign': 'center', 'fontWeight': 'bold'})
 
                 # 2. Cột PL
                 gb.configure_column('PL', width=50, minWidth=42, maxWidth=60,
+                                    headerTooltip="Phân loại: TAR (Target siêu phẩm), A (Rất tốt), B (Tốt)",
                                     cellStyle={'textAlign': 'center', 'fontWeight': 'bold', 'color': '#fbbf24'})
 
                 # 3. Cột Số nhà
                 gb.configure_column('Số nhà', width=95, minWidth=85, maxWidth=120,
+                                    headerTooltip="Click vào ô '👁️ ***' để xem số nhà chính xác",
                                     onCellClicked=vip_js["sonha_click"],
                                     cellStyle=vip_js["sonha_style"])
 
                 # 4. Cột Ảnh
                 gb.configure_column('Ảnh', header_name="Ảnh", width=45, minWidth=40, maxWidth=55,
+                                    headerTooltip="Click biểu tượng để mở album ảnh trên Google Drive",
                                     onCellClicked=vip_js["open_ggd_click"],
                                     cellStyle=vip_js["ggd_style"])
 
                 # 5. Cột Tên đường
-                gb.configure_column('Tên đường', width=130, minWidth=100, maxWidth=180,
+                gb.configure_column('Đường', width=130, minWidth=100, maxWidth=180,
+                                    headerTooltip="Tên đường",
                                     cellStyle={'color': '#38bdf8', 'fontWeight': 'bold'})
 
                 # 6. Phường, Quận
-                gb.configure_column('Phường', width=65, minWidth=50, maxWidth=85)
-                gb.configure_column('Quận', width=80, minWidth=65, maxWidth=110)
+                gb.configure_column('P.', width=55, minWidth=45, maxWidth=70,
+                                    headerTooltip="Phường")
+                gb.configure_column('Q.', width=65, minWidth=55, maxWidth=90,
+                                    headerTooltip="Quận")
 
                 # 7. Kích thước & Diện tích
-                gb.configure_column('Ngang', type=["numericColumn"], width=55, minWidth=45, maxWidth=70)
-                gb.configure_column('Dài', type=["numericColumn"], width=55, minWidth=45, maxWidth=70)
-                gb.configure_column('Diện tích', header_name="DT (m²)", type=["numericColumn"], width=65, minWidth=55, maxWidth=80)
+                gb.configure_column('Ngang', type=["numericColumn"], width=55, minWidth=45, maxWidth=70,
+                                    headerTooltip="Chiều ngang thực tế (m)")
+                gb.configure_column('Dài', type=["numericColumn"], width=55, minWidth=45, maxWidth=70,
+                                    headerTooltip="Chiều dài thực tế (m)")
+                gb.configure_column('DT', type=["numericColumn"], width=55, minWidth=50, maxWidth=75,
+                                    headerTooltip="Diện tích công nhận trên sổ (m²)")
 
                 # 8. Giá & Định giá
-                gb.configure_column('Giá', header_name="Giá (Tỷ)", type=["numericColumn"], width=70, minWidth=60, maxWidth=90,
+                gb.configure_column('Giá', type=["numericColumn"], width=65, minWidth=55, maxWidth=85,
+                                    headerTooltip="Giá chào bán (Tỷ VNĐ) - Tô xanh nếu rẻ hơn định giá",
                                     cellStyle=vip_js["gia_sale_style"])
-                gb.configure_column('Định giá', header_name="Định giá", type=["numericColumn"], width=70, minWidth=60, maxWidth=90,
+                gb.configure_column('Đ.Giá', type=["numericColumn"], width=65, minWidth=55, maxWidth=85,
+                                    headerTooltip="Định giá tham khảo thuật toán Đại Thế Kỷ (Tỷ VNĐ)",
                                     cellStyle=vip_js["dinhgia_style"])
-                gb.configure_column('Giá m²', header_name="Giá m²", type=["numericColumn"], width=65, minWidth=55, maxWidth=80)
+                gb.configure_column('Tr/m²', type=["numericColumn"], width=65, minWidth=55, maxWidth=80,
+                                    headerTooltip="Đơn giá trên mỗi mét vuông (Triệu/m²)")
 
                 # 9. Kết cấu, Đặc điểm, Ghi chú
-                gb.configure_column('Kết cấu', width=65, minWidth=55, maxWidth=90)
-                gb.configure_column('Đặc điểm', width=220, minWidth=150, maxWidth=350)
-                gb.configure_column('📝 Ghi chú', width=450, minWidth=250, resizable=True,
+                gb.configure_column('K.Cấu', width=60, minWidth=50, maxWidth=80,
+                                    headerTooltip="Kết cấu công trình (Số tầng, lầu, hầm, C4)")
+                gb.configure_column('Đ.Điểm', width=200, minWidth=140, maxWidth=320,
+                                    headerTooltip="Mã đặc điểm & phong thủy (Rê chuột vào từng ô để xem giải nghĩa chi tiết)",
+                                    tooltipField="_dacdiem_tooltip")
+                gb.configure_column('G.Chú', width=400, minWidth=200, resizable=True,
+                                    headerTooltip="Ghi chú tóm tắt của căn nhà",
                                     cellStyle={'color': '#f59e0b', 'fontWeight': '500'})
 
                 # 10. Ẩn các cột kỹ thuật
@@ -808,6 +888,7 @@ def render_vip_portal(df_houses: pd.DataFrame, df_kids: pd.DataFrame, gc=None, s
                 gb.configure_column('_link_ggd', hide=True)
                 gb.configure_column('_reveal_trigger', hide=True)
                 gb.configure_column('_link_trigger', hide=True)
+                gb.configure_column('_dacdiem_tooltip', hide=True)
 
                 refresh_count = st.session_state.get('vip_grid_refresh', 0)
                 ag_response = AgGrid(
@@ -847,14 +928,14 @@ def render_vip_portal(df_houses: pd.DataFrame, df_kids: pd.DataFrame, gc=None, s
                                 record_vip_action(
                                     kid=kid, ten_khach=ten_khach, uid=t_uid,
                                     sonha=str(t_row.get('_real_sonha', '')),
-                                    tenduong=str(t_row.get('Tên đường', '')),
-                                    quan_phuong=f"{t_row.get('Phường', '')}, {t_row.get('Quận', '')}",
+                                    tenduong=str(t_row.get('Đường', '')),
+                                    quan_phuong=f"{t_row.get('P.', '')}, {t_row.get('Q.', '')}",
                                     gia=str(t_row.get('Giá', '')),
                                     hanh_dong="XEM_SO_NHA",
                                     chi_tiet=f"Mở số nhà: {t_row.get('_real_sonha', '')}",
                                     gc=gc, sheet_id=sheet_id
                                 )
-                                st.toast(f"📍 Đã mở địa chỉ: {t_row.get('_real_sonha', '')} {t_row.get('Tên đường', '')}!")
+                                st.toast(f"📍 Đã mở địa chỉ: {t_row.get('_real_sonha', '')} {t_row.get('Đường', '')}!")
                                 st.rerun()
 
                     # C. Trigger mở link ảnh
@@ -866,15 +947,15 @@ def render_vip_portal(df_houses: pd.DataFrame, df_kids: pd.DataFrame, gc=None, s
                                 record_vip_action(
                                     kid=kid, ten_khach=ten_khach, uid=l_uid,
                                     sonha=str(l_row.get('_real_sonha', '')),
-                                    tenduong=str(l_row.get('Tên đường', '')),
-                                    quan_phuong=f"{l_row.get('Phường', '')}, {l_row.get('Quận', '')}",
+                                    tenduong=str(l_row.get('Đường', '')),
+                                    quan_phuong=f"{l_row.get('P.', '')}, {l_row.get('Q.', '')}",
                                     gia=str(l_row.get('Giá', '')),
                                     hanh_dong="XEM_LINK_ANH",
                                     chi_tiet=f"Mở album ảnh: {l_row.get('_link_ggd', '')}",
                                     gc=gc, sheet_id=sheet_id
                                 )
             else:
-                st.dataframe(df_display.drop(columns=['_uid', '_real_sonha', '_link_ggd', '_reveal_trigger', '_link_trigger'], errors='ignore'), use_container_width=True)
+                st.dataframe(df_display.drop(columns=['_uid', '_real_sonha', '_link_ggd', '_reveal_trigger', '_link_trigger', '_dacdiem_tooltip'], errors='ignore'), use_container_width=True)
 
             st.caption("💡 **Hướng dẫn**: Click cột **`⭐`** để chọn/bỏ chọn căn quan tâm • Click ô **`👁️ ***`** ở cột Số nhà để mở địa chỉ chính xác • Click **`📂`** để mở album ảnh.")
 

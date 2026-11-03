@@ -1265,15 +1265,20 @@ def extract_highlight(text):
     found = []
     
     # 1. Các tag cố định
-    tags = ["TOH", "2MT", "CGO", "P1C", "T1C", "GAC", "GCH", "DAD", "NTC", "SA4", "NOH", "MTR", "QHH", "TTT", "DTT", "CVI", "GCV", "VLA", "VPH", "TMA", "MAT", "HXT", "HXH", "HBG", "KLP"]
+    tags = [
+        "CVI", "GCV", "DAD", "2MT", "CGO", "P1C", "T1C", "HXT", "HXH", "HBG",
+        "MAT", "MT", "MTR", "SA4", "NOH", "TOH", "GAC", "GCH", "QHH", "TTT",
+        "DTT", "KLP", "TMA", "NTC", "VLA", "VPH", "KSA", "C4"
+    ]
     for t in tags:
         if t in t_upper and t not in found:
             found.append(t)
             
-    # 2. Các tag động theo mẫu Regex (PNxx, SCNxx, SLGxx, QHxx, DTNxx)
-    dynamic_matches = re.findall(r'\b(PN|SCN|SLG|QH|DTN)\s*(\d+)\b', t_upper)
+    # 2. Các tag động theo mẫu Regex (PNxx, SCNxx, SLGxx, QHxx, DTNxx, CHVxx)
+    dynamic_matches = re.findall(r'\b(PN|SCN|SLG|QH|DTN|CHV)\s*([0-9.,]+)\b', t_upper)
     for prefix, num in dynamic_matches:
-        tag = f"{prefix}{num}"
+        num_clean = str(num).replace(',', '.')
+        tag = f"{prefix}{num_clean}"
         if tag not in found:
             found.append(tag)
             
